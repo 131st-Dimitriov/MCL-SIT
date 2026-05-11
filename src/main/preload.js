@@ -8,6 +8,15 @@ contextBridge.exposeInMainWorld('sitAPI', {
     // Splash
     chooseMode: (mode, remember) => ipcRenderer.send('app:chooseMode', { mode, remember }),
 
+    // Auto-updater
+    checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+    downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+    quitAndInstall: () => ipcRenderer.send('updater:quitAndInstall'),
+    onUpdateProgress: (callback) => {
+        const listener = (_event, pct) => callback(pct);
+        ipcRenderer.on('updater:progress', listener);
+    },
+
     // Server window
     getServerStatus: () => ipcRenderer.invoke('server:status'),
     getServerIps: () => ipcRenderer.invoke('server:getIps'),
@@ -16,7 +25,6 @@ contextBridge.exposeInMainWorld('sitAPI', {
     onServerSnapshot: (callback) => {
         const listener = (_event, data) => callback(data);
         ipcRenderer.on('server:snapshot', listener);
-        // No off() because we don't intend to swap callbacks in this UI
     },
     quitApp: () => ipcRenderer.invoke('app:quit')
 });

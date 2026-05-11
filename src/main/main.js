@@ -17,6 +17,7 @@ const os = require('os');
 const config = require('./config');
 const serverHost = require('./server-host');
 const hookCheck = require('./hook-check');
+const autoUpdater = require('./auto-updater');
 const logger = require('./logger');
 
 logger.init();
@@ -354,6 +355,18 @@ ipcMain.handle('server:setPassword', async (event, pwd) => {
 
 ipcMain.on('server:openLogs', () => showServerLogs());
 ipcMain.handle('app:quit', () => { app.quit(); });
+
+// ---- Updater IPC ---------------------------------------------------------
+ipcMain.handle('updater:check', () => autoUpdater.checkForUpdates());
+ipcMain.handle('updater:download', () => autoUpdater.downloadUpdate());
+ipcMain.on('updater:quitAndInstall', () => autoUpdater.quitAndInstall());
+
+// Forward progress events to the splash window
+autoUpdater.onProgress((pct) => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.webContents.send('updater:progress', pct);
+    }
+});
 
 // ----------------------------------------------------------------------------
 // Lifecycle
