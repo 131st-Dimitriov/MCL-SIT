@@ -1,75 +1,45 @@
 # MCL-SIT
 
-Système d'Information Tactique (SIT) pour DCS World, packagé en application Electron.
+Système d'information tactique pour **DCS World**, conçu pour les équipages au sol et les opérations interarmes.
 
-## Architecture (V16)
+![Aperçu MCL-SIT](docs/screenshot.png)
 
-```
-mcl-sit/
-├── src/
-│   ├── main/         Process Electron (main + sous-process serveur)
-│   ├── renderer/     Interface SIT (HTML/CSS/JS, ex-leclerc-sit.html)
-│   ├── server/       Hub Node (ex-sit-multi.js)
-│   └── lua/          Hook DCS (copié post-install dans Saved Games)
-├── build/            Ressources installeur (icône, scripts NSIS)
-└── dist/             Builds générés (gitignoré)
-```
+---
 
-## Pré-requis développeur
+## C'est quoi ?
 
-- Node.js 18+ (recommandé 20 LTS)
-- npm
+MCL-SIT est une **tablette tactique** qui tourne en parallèle de DCS et donne à l'équipage une vision claire de la situation : positions amies et ennemies, plans de feu, gestion de l'EVASAN, communication entre joueurs, le tout sur une carte topographique avec grille MGRS.
+
+L'idée : sortir le commandement de la tête du chef de char et lui donner un vrai outil pour planifier, coordonner et rendre compte. Comme dans la vraie vie.
+
+## Ce que ça permet
+
+- **Situation tactique partagée** entre tous les véhicules connectés (joueurs et IA)
+- **Plans de feu artillerie** (JFO) avec sélection de la pièce, type de tir, ajustement
+- **Spawn de groupes** en cours de mission : peloton 105, CSAR, ravitaillement
+- **EVASAN** : demande, prise en charge, suivi des blessés
+- **Profil d'élévation** entre deux points (visée masquée, ligne de vue)
+- **DDM** — détection missile partagée à toute la coalition
+- **Drone** : plan de vol partagé, retasking en clic droit
+- **Chat tactique** (texte + messages prédéfinis)
+- **PCDB** — notes partagées géolocalisées sur la carte
+- **Coordination CSAR** avec recherche de pilote éjecté
+
+## Comment ça marche
+
+- Un **serveur SIT** tourne sur la machine DCS (ou un PC dédié)
+- Chaque joueur lance MCL-SIT en mode **Client** et se connecte au serveur
+- Un **hook Lua** côté DCS fait remonter la position des véhicules, les ennemis détectés, les événements de mission
+- Tout est synchronisé en temps réel via WebSocket
+
+Pour les sessions solo : un mode **Client + Serveur** permet de tout faire tourner sur le même PC.
 
 ## Installation
 
-```bash
-cd mcl-sit
-npm install
-```
+Télécharge le dernier [installeur dans la section Releases](../../releases/latest) (`MCL-SIT-Setup-X.Y.Z.exe`), exécute, suis le wizard. Tout est inclus : Node.js embarqué, hook DCS posé automatiquement, pare-feu configuré.
 
-Cette commande télécharge ~250 MB de dépendances (Electron + builder). Une seule fois.
+Les mises à jour sont vérifiées au démarrage de l'app.
 
-## Lancer en mode dev
+---
 
-```bash
-npm start          # production-like
-npm run start:dev  # avec DevTools ouverts
-```
-
-Le SIT s'affiche dans une fenêtre Electron. Au Lot 1, c'est exactement comme ouvrir
-l'ancien `leclerc-sit-v15.html` dans Chrome, mais dans une fenêtre dédiée.
-
-## Builder un .exe portable (pour tester sans installeur)
-
-```bash
-npm run build:portable
-```
-
-Génère un `.exe` autonome dans `dist/`. Aucune installation requise, double-clic = lancement.
-
-## Builder un installeur NSIS
-
-```bash
-npm run build
-```
-
-Génère `dist/MCL-SIT-Setup-16.0.0.exe`. Lot 3 ajoutera la sélection du dossier DCS
-et la copie du hook.
-
-## Publier une nouvelle version (Lot 5+)
-
-```bash
-npm version patch    # bump 16.0.0 → 16.0.1
-npm run release      # build + upload sur GitHub Releases
-```
-
-Nécessite la variable d'environnement `GH_TOKEN` (token GitHub avec scope `repo`).
-
-## Progression
-
-- [x] **Lot 1** — Squelette Electron : fenêtre + SIT V15 actuel embarqué
-- [ ] **Lot 2** — Splash + modes Client / Server / Both
-- [ ] **Lot 3** — Installeur NSIS avec sélection dossier DCS + hook + pare-feu
-- [ ] **Lot 4** — Obfuscation JS + ASAR intégrité
-- [ ] **Lot 5** — Auto-update via GitHub Releases
-- [ ] **Lot 6** — Configuration GitHub + premier push
+*Développé par 131st-Dimitriov pour la 131st Squadron.*
