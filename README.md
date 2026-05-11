@@ -6,7 +6,7 @@ Système d'information tactique pour **DCS World**, conçu pour les équipages a
 
 ---
 
-** DISCORD 131st DEATH VIPERS ** : Notre escadrille se fonde avant tout sur l'innovation et la recherche en matière de développement, au travers du modding (FRENCHPACK, DAMPACK), du scripting ou de ce type d'applications. Nous recrutons sur tout hélicoptère, pas mal d'avions et évidemment en commandement grâce à ce type d'outil. 
+**DISCORD 131st DEATH VIPERS** : Notre escadrille se fonde avant tout sur l'innovation et la recherche en matière de développement, au travers du modding (FRENCHPACK, DAMPACK), du scripting ou de ce type d'applications. Nous recrutons sur tout hélicoptère, pas mal d'avions et évidemment en commandement grâce à ce type d'outil. (https://discord.gg/E7BVbZAmh6)
 
 ## C'est quoi ?
 
