@@ -1,0 +1,72 @@
+{
+  "name": "mcl-sit",
+  "version": "16.0.0",
+  "description": "MCL-SIT — Système d'Information Tactique pour DCS World",
+  "main": "src/main/main.js",
+  "author": "131st-Dimitriov",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --enable-logging",
+    "build:portable": "electron-builder --win dir",
+    "build:installer": "electron-builder --win dir && node scripts/prepare-inno.js",
+    "build": "electron-builder",
+    "release": "electron-builder --publish always"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "javascript-obfuscator": "^4.1.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.2.1",
+    "ws": "^8.18.0"
+  },
+  "build": {
+    "appId": "fr.dimitriov.mcl-sit",
+    "productName": "MCL-SIT",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "!src/lua/**/*"
+    ],
+    "asarUnpack": [
+      "src/server/**/*",
+      "node_modules/ws/**/*"
+    ],
+    "afterPack": "scripts/obfuscate.js",
+    "extraResources": [
+      {
+        "from": "src/lua",
+        "to": "lua",
+        "filter": ["**/*.lua"]
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "131st-Dimitriov",
+      "repo": "MCL-SIT",
+      "private": false,
+      "releaseType": "release"
+    }
+  }
+}

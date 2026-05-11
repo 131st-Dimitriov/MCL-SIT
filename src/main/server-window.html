@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>MCL-SIT — Serveur SIT</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+        width: 100%; height: 100%;
+        background: radial-gradient(circle at 30% 30%, #15252b 0%, #0a1012 70%, #050708 100%);
+        font-family: 'Courier New', monospace;
+        color: #c8d1c8;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    body { display: flex; flex-direction: column; padding: 22px 28px; }
+    .led-bar { display: flex; gap: 7px; margin-bottom: 16px; }
+    .led {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #1a2528; border: 1px solid #2a3a3d;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .led.on { background: #7ee36c; border-color: #5fa860; box-shadow: 0 0 6px rgba(126,227,108,0.6); }
+    .led.amber { background: #ef9f27; border-color: #b07820; box-shadow: 0 0 5px rgba(239,159,39,0.5); }
+    .led.red { background: #ef554f; border-color: #a23a35; box-shadow: 0 0 5px rgba(239,85,79,0.6); }
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+    .header .hex {
+        width: 32px; height: 32px; background: #0c1517;
+        border: 2px solid #ef9f27;
+        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+        display: flex; align-items: center; justify-content: center;
+    }
+    .header .hex::after { content: ''; width: 11px; height: 11px; background: #ef9f27; border-radius: 50%; }
+    .title { font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #e8efe8; }
+    .subtitle { font-size: 10px; font-weight: 700; color: #ef9f27; letter-spacing: 3px; margin-top: 3px; }
+    .version-chip {
+        margin-left: auto;
+        font-size: 10px; color: #7ee36c;
+        border: 1px solid rgba(126,227,108,0.4);
+        background: rgba(15,30,18,0.6);
+        padding: 4px 10px; letter-spacing: 1.5px; font-weight: 800;
+    }
+    .status-line {
+        display: flex; align-items: center; gap: 10px;
+        margin-top: 12px; padding: 8px 12px;
+        background: rgba(15,25,30,0.6);
+        border: 1px solid rgba(126,227,108,0.3);
+        border-radius: 4px;
+        font-size: 12px;
+    }
+    .status-line.down { border-color: rgba(239,85,79,0.45); }
+    .status-line .label { color: #7e9690; letter-spacing: 1.5px; font-size: 10px; }
+    .status-line .val { color: #e8efe8; letter-spacing: 1px; }
+    .status-line .val.green { color: #7ee36c; font-weight: 800; }
+    .status-line .val.red { color: #ef554f; font-weight: 800; }
+
+    .info-grid {
+        display: grid; grid-template-columns: auto 1fr;
+        gap: 6px 14px;
+        margin-top: 12px;
+        padding: 10px 14px;
+        background: rgba(15,25,28,0.45);
+        border: 1px solid rgba(120,150,150,0.18);
+        border-radius: 4px;
+        font-size: 11px;
+    }
+    .info-grid .lbl { color: #7e9690; letter-spacing: 1.5px; }
+    .info-grid .val { color: #e8efe8; }
+    .info-grid input {
+        background: #0a1316;
+        color: #e8efe8;
+        border: 1px solid rgba(95,168,194,0.4);
+        padding: 4px 8px;
+        font-family: inherit; font-size: 11px;
+        width: 160px;
+    }
+    .info-grid input:focus { outline: none; border-color: rgba(95,168,194,0.85); }
+    .info-grid button.mini {
+        background: linear-gradient(180deg, #16252a, #0a1316);
+        border: 1px solid rgba(95,168,194,0.4);
+        color: #c8d1c8;
+        font-family: inherit; font-size: 10px;
+        padding: 4px 12px;
+        letter-spacing: 1px; cursor: pointer;
+    }
+    .info-grid button.mini:hover { border-color: rgba(95,168,194,0.85); }
+
+    .section-title {
+        font-size: 11px; color: #9fb8a8;
+        margin: 16px 0 8px 0;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .section-title .counter {
+        background: rgba(95,168,194,0.18);
+        color: #5fa8c2;
+        border: 1px solid rgba(95,168,194,0.4);
+        padding: 1px 8px;
+        font-weight: 800;
+        font-size: 10px;
+        letter-spacing: 1px;
+    }
+    .players {
+        flex: 1;
+        overflow-y: auto;
+        background: rgba(10,18,20,0.5);
+        border: 1px solid rgba(120,150,150,0.18);
+        border-radius: 4px;
+        padding: 8px;
+        min-height: 100px;
+    }
+    .player {
+        display: flex; align-items: center; gap: 10px;
+        padding: 6px 10px;
+        margin-bottom: 4px;
+        background: rgba(20,30,32,0.6);
+        border-left: 3px solid #5fa8c2;
+        font-size: 12px;
+    }
+    .player.blue { border-left-color: #5fa8c2; }
+    .player.red { border-left-color: #ef554f; }
+    .player .name {
+        font-weight: 700; color: #e8efe8;
+        flex: 1;
+    }
+    .player .coalition {
+        font-size: 9px;
+        padding: 2px 8px;
+        border-radius: 2px;
+        font-weight: 800; letter-spacing: 1.5px;
+    }
+    .player .coalition.blue { background: rgba(95,168,194,0.18); color: #5fa8c2; border: 1px solid rgba(95,168,194,0.4); }
+    .player .coalition.red { background: rgba(239,85,79,0.18); color: #ef554f; border: 1px solid rgba(239,85,79,0.4); }
+    .player .coalition.unknown { background: rgba(120,150,150,0.18); color: #9fb8a8; border: 1px solid rgba(120,150,150,0.4); }
+    .empty {
+        text-align: center;
+        padding: 20px;
+        color: #5a6a6a;
+        font-size: 11px;
+        letter-spacing: 1.5px;
+    }
+    .actions {
+        margin-top: 12px;
+        display: flex; gap: 10px;
+        justify-content: flex-end;
+    }
+    .actions button {
+        background: linear-gradient(180deg, #16252a, #0a1316);
+        border: 1px solid rgba(95,168,194,0.4);
+        color: #c8d1c8;
+        font-family: inherit; font-size: 11px;
+        padding: 8px 16px;
+        letter-spacing: 1.5px; cursor: pointer;
+    }
+    .actions button:hover { border-color: rgba(95,168,194,0.85); background: linear-gradient(180deg, #1e323a, #11212a); }
+    .actions button.danger { border-color: rgba(239,85,79,0.5); color: #ef554f; }
+    .actions button.danger:hover { border-color: rgba(239,85,79,0.95); background: linear-gradient(180deg, #2a1414, #160808); }
+
+    .footer {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(120,150,150,0.18);
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 9px; color: #5a6a6a; letter-spacing: 1px;
+    }
+    .footer .brand { font-family: 'Courier New', monospace; font-style: italic; color: #7e9690; font-size: 11px; }
+</style>
+</head>
+<body>
+    <div class="led-bar">
+        <div class="led on" id="led1"></div>
+        <div class="led on" id="led2"></div>
+        <div class="led on" id="led3"></div>
+        <div class="led amber" id="led4"></div>
+    </div>
+    <div class="header">
+        <div class="hex"></div>
+        <div>
+            <div class="title">MCL-SIT</div>
+            <div class="subtitle">SERVEUR SIT — HUB</div>
+        </div>
+        <div class="version-chip" id="version">v16.0.0</div>
+    </div>
+
+    <div class="status-line" id="statusLine">
+        <span class="label">STATUT</span>
+        <span class="val green" id="statusVal">DÉMARRAGE…</span>
+    </div>
+
+    <div class="info-grid">
+        <div class="lbl">IP LOCALE</div>
+        <div class="val" id="ipLocal">détection…</div>
+        <div class="lbl">IP INTERNET</div>
+        <div class="val" id="ipPublic">détection…</div>
+        <div class="lbl">PORT</div>
+        <div class="val" id="port">5026</div>
+        <div class="lbl">MOT DE PASSE</div>
+        <div class="val" style="display:flex;gap:6px;align-items:center;">
+            <input type="text" id="password" value="Scramble">
+            <button class="mini" id="btnApplyPwd">Appliquer</button>
+        </div>
+    </div>
+
+    <div class="section-title">
+        <span>Joueurs connectés</span>
+        <span class="counter" id="counter">0</span>
+    </div>
+    <div class="players" id="players">
+        <div class="empty">Aucun joueur connecté</div>
+    </div>
+
+    <div class="actions">
+        <button id="btnLogs">VOIR LES LOGS</button>
+        <button id="btnStop" class="danger">ARRÊTER LE SERVEUR</button>
+    </div>
+
+    <div class="footer">
+        <div class="brand">MCL-SIT</div>
+        <div class="copyright">131st-Dimitriov</div>
+    </div>
+
+<script>
+const api = window.sitAPI;
+
+async function initInfo() {
+    try {
+        const info = await api.getAppInfo();
+        document.getElementById('version').textContent = 'v' + info.version;
+    } catch (e) {}
+}
+
+async function refreshIps() {
+    try {
+        const ips = await api.getServerIps();
+        document.getElementById('ipLocal').textContent = ips.local || '—';
+        document.getElementById('ipPublic').textContent = ips.public || '(détection en cours…)';
+    } catch (e) {
+        document.getElementById('ipLocal').textContent = '—';
+        document.getElementById('ipPublic').textContent = '—';
+    }
+}
+
+function renderClients(list) {
+    const players = document.getElementById('players');
+    const counter = document.getElementById('counter');
+    counter.textContent = list.length;
+    if (!list || list.length === 0) {
+        players.innerHTML = '<div class="empty">Aucun joueur connecté</div>';
+        return;
+    }
+    players.innerHTML = list.map(c => {
+        const coal = (c.coalition || '').toLowerCase();
+        const coalClass = (coal === 'blue' || coal === 'red') ? coal : 'unknown';
+        const coalLabel = coal === 'blue' ? 'BLEUE' : (coal === 'red' ? 'ROUGE' : 'INCONNUE');
+        const name = (c.name || '?').replace(/[<>&]/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m]));
+        return `<div class="player ${coalClass}">
+            <div class="name">${name}</div>
+            <div class="coalition ${coalClass}">${coalLabel}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderStatus(snap) {
+    const statusLine = document.getElementById('statusLine');
+    const statusVal = document.getElementById('statusVal');
+    const led4 = document.getElementById('led4');
+    if (snap.running) {
+        statusLine.classList.remove('down');
+        statusVal.classList.remove('red');
+        statusVal.classList.add('green');
+        statusVal.textContent = 'ACTIF — Port ' + (snap.port || '5026');
+        led4.classList.remove('red');
+        led4.classList.add('on');
+    } else {
+        statusLine.classList.add('down');
+        statusVal.classList.remove('green');
+        statusVal.classList.add('red');
+        statusVal.textContent = 'ARRÊTÉ';
+        led4.classList.remove('on');
+        led4.classList.add('red');
+    }
+    document.getElementById('port').textContent = snap.port || '5026';
+}
+
+// Receive live updates from main
+api.onServerSnapshot((snap) => {
+    renderStatus(snap);
+    renderClients(snap.clients || []);
+});
+
+document.getElementById('btnLogs').addEventListener('click', () => api.openServerLogs());
+document.getElementById('btnStop').addEventListener('click', async () => {
+    await api.quitApp();
+});
+document.getElementById('btnApplyPwd').addEventListener('click', async () => {
+    const pwd = document.getElementById('password').value.trim();
+    if (!pwd) { alert('Le mot de passe ne peut être vide.'); return; }
+    const r = await api.setServerPassword(pwd);
+    if (r && r.ok) {
+        alert('Mot de passe modifié et serveur redémarré.\nLes clients déjà connectés ne sont pas affectés tant qu\'ils restent en ligne.');
+    } else {
+        alert('Erreur : ' + ((r && r.error) || 'inconnue'));
+    }
+});
+
+// Initial: ask for current snapshot
+(async () => {
+    await initInfo();
+    await refreshIps();
+    try {
+        const r = await api.getServerStatus();
+        if (r) {
+            renderStatus(r);
+            renderClients(r.clients || []);
+            document.getElementById('password').value = r.password || 'Scramble';
+        }
+    } catch (e) {}
+})();
+</script>
+</body>
+</html>
