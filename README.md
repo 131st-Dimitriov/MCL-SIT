@@ -6,11 +6,14 @@ Système d'information tactique pour **DCS World**, conçu pour les équipages a
 
 ---
 
+** DISCORD 131st DEATH VIPERS ** : Notre escadrille se fonde avant tout sur l'innovation et la recherche en matière de développement, au travers du modding (FRENCHPACK, DAMPACK), du scripting ou de ce type d'applications. Nous recrutons sur tout hélicoptère, pas mal d'avions et évidemment en commandement grâce à ce type d'outil. 
+
 ## C'est quoi ?
 
 MCL-SIT est une **tablette tactique** qui tourne en parallèle de DCS et donne à l'équipage une vision claire de la situation : positions amies et ennemies, plans de feu, gestion de l'EVASAN, communication entre joueurs, le tout sur une carte topographique avec grille MGRS.
 
-L'idée : sortir le commandement de la tête du chef de char et lui donner un vrai outil pour planifier, coordonner et rendre compte. Comme dans la vraie vie.
+L'idée : sortir le commandement de la tête du chef de char et lui donner un vrai outil pour planifier, coordonner et rendre compte. Il permet également à plus large mesure à tout utilisateur en disposant, même sans DCS, de gérer et commander un champ de bataille. 
+
 
 ## Ce que ça permet
 
@@ -32,14 +35,12 @@ L'idée : sortir le commandement de la tête du chef de char et lui donner un vr
 - Un **hook Lua** côté DCS fait remonter la position des véhicules, les ennemis détectés, les événements de mission
 - Tout est synchronisé en temps réel via WebSocket
 
-Pour les sessions solo : un mode **Client + Serveur** permet de tout faire tourner sur le même PC.
+Pour les sessions solo : un mode **Client + Serveur** permet de tout faire tourner sur le même PC. (Encore en travail)
 
 ## Installation
 
-Télécharge le dernier [installeur dans la section Releases](../../releases/latest) (`MCL-SIT-Setup-X.Y.Z.exe`), exécute, suis le wizard. Tout est inclus : Node.js embarqué, hook DCS posé automatiquement, pare-feu configuré.
-
-Les mises à jour sont vérifiées au démarrage de l'app.
+Téléchargez simplement la dernière release et lancez l'installeur. Le SIT se mettra automatiquement à jour en cas de maj côté github. (Miracle de la technologie moderne...)
 
 ---
 
-*Développé par 131st-Dimitriov pour la 131st Squadron.*
+*Développé par 131st-Dimitriov pour la 131st Death Vipers.*
