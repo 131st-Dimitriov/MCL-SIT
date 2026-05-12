@@ -2332,7 +2332,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     <line x1="22" y1="0" x2="28" y2="0" stroke="currentColor" stroke-width="1"/>
                 </svg>
                 <span class="sit-title-full" style="font-size:22px;font-weight:bold;letter-spacing:4px;">MCL<span style="color:#888;"> - </span>SIT</span>
-                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V15</span>
+                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V17</span>
             </div>
             <div id="status">
                 <button onclick="openTutorial()" id="btn-help" data-i18n="btn.help">? AIDE</button>
@@ -3829,6 +3829,9 @@ body.combat-tablet #left-actions.left-actions-hidden,
             }
         }
         let vehicleData={x:0,y:0,heading:0,turretHeading:0,commanderTurretHeading:-1,speed:0,allies:[],threats:[]};
+        // V16 fix: flag set true on first ownVehicle msg. Replaces the (x===0 && y===0) heuristic
+        // which was buggy when the player vehicle was exactly at the reference origin.
+        let vehicleDataPopulated=false;
         let viewOffset={x:0,y:0},zoom=0.038,updateCount=0,mousePos=null;
         // V6 : modes et worldstate
         var sitMode='player'; // 'player', 'gamemaster', 'tactcom'
@@ -6912,7 +6915,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 drawHint('ELEV: mode joueur uniquement', '#ffaa00');
                 return;
             }
-            if (vehicleData.x === 0 && vehicleData.y === 0) {
+            if (!vehicleDataPopulated) {
                 drawHint('ELEV: position véhicule indisponible', '#ffaa00');
                 return;
             }
@@ -10289,6 +10292,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 // V8: own vehicle telemetry from the server hook (replaces bridge.js/Export.lua)
                 if(msg.type==='ownVehicle'){
                     try{
+                        vehicleDataPopulated=true;
                         // Position in SIT coords: dx/dz are DCS world coords of this unit.
                         // Convert to SIT local frame using refX/refZ when available.
                         if(typeof msg.dx==='number'&&typeof msg.dz==='number'){
@@ -10693,8 +10697,14 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 bLoadMap.addEventListener('mouseup',()=>{
                     if(_lmTimer){clearTimeout(_lmTimer);_lmTimer=null;}
                     if(_lmIsLong){_lmIsLong=false;return;}
-                    // Short click → original behavior
-                    if(typeof openMapConfigModal==='function')openMapConfigModal();
+                    // V17: short click → open the maps library window.
+                    // Fallback to legacy modal if running outside Electron (e.g. browser test).
+                    if (window.sitAPI && typeof window.sitAPI.openMapsLibrary === 'function') {
+                        // Opening from the SIT main window — keep SIT running, open a child window
+                        window.sitAPI.openMapsLibrary();
+                    } else if (typeof openMapConfigModal === 'function') {
+                        openMapConfigModal();
+                    }
                 });
                 bLoadMap.addEventListener('mouseleave',()=>{
                     if(_lmTimer){clearTimeout(_lmTimer);_lmTimer=null;_lmIsLong=false;}
@@ -10710,6 +10720,42 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     bMgrs.classList.toggle('mgrs-on', mgrsLabelsEnabled);
                 });
                 bMgrs.classList.toggle('mgrs-on', mgrsLabelsEnabled);
+            }
+            // V17: receive a map from the standalone library window
+            if (window.sitAPI && typeof window.sitAPI.onMapsLoadMap === 'function') {
+                window.sitAPI.onMapsLoadMap((payload) => {
+                    try {
+                        if (!payload || !payload.dataURL) return;
+                        const corner = parseDCSCoord(payload.cornerCoord || '');
+                        if (!corner) {
+                            sitAlert('Coin de référence invalide pour cette carte. Ouvrez la bibliothèque et éditez cette entrée.');
+                            return;
+                        }
+                        const config = {
+                            mapImage: payload.dataURL,
+                            corner: { lat: corner.lat, lon: corner.lon },
+                            widthKm: payload.widthKm,
+                            heightKm: payload.heightKm
+                        };
+                        if (typeof saveMapToDB === 'function') {
+                            saveMapToDB(config).catch(() => {});
+                        }
+                        mapConfig = config;
+                        if (typeof mapCornerCalibrated !== 'undefined') mapCornerCalibrated = null;
+                        mapImage = new Image();
+                        mapImage.onload = () => { mapReady = true; };
+                        mapImage.src = config.mapImage;
+                        if (typeof sendMapCalibrate === 'function') sendMapCalibrate();
+                        sitToast('Carte « ' + payload.name + ' » chargée ✓');
+                    } catch (e) {
+                        console.error('maps:loadMap failed', e);
+                        sitAlert('Erreur lors du chargement : ' + e.message);
+                    }
+                });
+                // Tell main we're ready to receive pending maps
+                if (typeof window.sitAPI.rendererReady === 'function') {
+                    setTimeout(() => window.sitAPI.rendererReady(), 200);
+                }
             }
         }
         const status=document.getElementById('status');
@@ -10880,7 +10926,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span style="color:#778;">-</span> Système d\'Information Tactique</span>'+
-                '<span class="sit-title-version">V15</span>';
+                '<span class="sit-title-version">V17</span>';
         }
 
         // Marque châssis.
@@ -10921,14 +10967,14 @@ body.combat-tablet #left-actions.left-actions-hidden,
         if(typeof configMenuVisible!=='undefined') configMenuVisible=false;
 
         // Titre logiciel demandé.
-        document.title='MCL - SIT V15';
+        document.title='MCL-SIT V17';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+ 
-                '<span class="sit-title-version">V15</span>';
+                '<span class="sit-title-version">V17</span>';
         }
 
         // Marque châssis.
@@ -11069,14 +11115,14 @@ body.combat-tablet #title .sit-title-version{
         document.body.classList.add('icone','combat-tablet');
 
         // Titre final : MCL - SIT V15, centré dans sa case.
-        document.title='MCL - SIT V15';
+        document.title='MCL-SIT V17';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+
-                '<span class="sit-title-version">V15</span>';
+                '<span class="sit-title-version">V17</span>';
         }
 
         // Sécurise le retrait de CONFIG au cas où une version antérieure le réinjecte.

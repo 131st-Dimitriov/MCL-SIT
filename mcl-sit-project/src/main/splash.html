@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>MCL-SIT — Démarrage</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+        width: 100%; height: 100%;
+        background: radial-gradient(circle at 30% 30%, #15252b 0%, #0a1012 70%, #050708 100%);
+        font-family: 'Courier New', monospace;
+        color: #c8d1c8;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    body {
+        display: flex; flex-direction: column;
+        padding: 24px 32px;
+    }
+    .led-bar {
+        display: flex; gap: 7px;
+        margin-bottom: 18px;
+    }
+    .led {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #1a2528;
+        border: 1px solid #2a3a3d;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
+    }
+    .led.on { background: #7ee36c; border-color: #5fa860; box-shadow: 0 0 6px rgba(126,227,108,0.6), inset 0 1px 1px rgba(255,255,255,0.2); }
+    .led.amber { background: #ef9f27; border-color: #b07820; box-shadow: 0 0 5px rgba(239,159,39,0.5); }
+    .header {
+        display: flex; align-items: center; gap: 16px;
+        margin-bottom: 6px;
+    }
+    .header .hex {
+        width: 36px; height: 36px;
+        background: #0c1517;
+        border: 2px solid #5fa8c2;
+        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+        display: flex; align-items: center; justify-content: center;
+    }
+    .header .hex::after {
+        content: '';
+        width: 12px; height: 12px;
+        background: #5fa8c2;
+        border-radius: 50%;
+    }
+    .title-block { line-height: 1.05; }
+    .title {
+        font-size: 24px; font-weight: 900;
+        letter-spacing: 4px;
+        color: #e8efe8;
+        text-shadow: 0 0 8px rgba(95,168,194,0.35);
+    }
+    .subtitle {
+        font-size: 11px; font-weight: 700;
+        color: #5fa8c2;
+        letter-spacing: 3px;
+        margin-top: 3px;
+    }
+    .version-chip {
+        margin-left: auto;
+        font-size: 10px;
+        color: #7ee36c;
+        border: 1px solid rgba(126,227,108,0.4);
+        background: rgba(15,30,18,0.6);
+        padding: 4px 10px;
+        letter-spacing: 1.5px;
+        font-weight: 800;
+    }
+    .question {
+        font-size: 12px;
+        color: #9fb8a8;
+        margin: 20px 0 14px 0;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+    }
+    .modes {
+        display: flex; flex-direction: column;
+        gap: 10px;
+        flex: 1;
+    }
+    .mode-btn {
+        background: linear-gradient(180deg, #16252a, #0a1316);
+        border: 1px solid rgba(95,168,194,0.35);
+        border-radius: 4px;
+        padding: 14px 18px;
+        color: #c8d1c8;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        cursor: pointer;
+        text-align: left;
+        display: flex; align-items: center; gap: 16px;
+        transition: background 80ms, border-color 80ms, transform 60ms;
+    }
+    .mode-btn:hover {
+        background: linear-gradient(180deg, #1e323a, #11212a);
+        border-color: rgba(95,168,194,0.85);
+    }
+    .mode-btn:active { transform: translateY(1px); }
+    .mode-btn .ico {
+        width: 36px; height: 36px;
+        flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: #0a1012;
+        border: 1px solid rgba(126,227,108,0.4);
+        border-radius: 4px;
+        font-size: 18px;
+        color: #7ee36c;
+        font-weight: 900;
+    }
+    .mode-btn .label {
+        font-size: 14px; font-weight: 800;
+        letter-spacing: 2px;
+        color: #e8efe8;
+    }
+    .mode-btn .desc {
+        font-size: 10px;
+        color: #7e9690;
+        margin-top: 3px;
+        letter-spacing: 0.5px;
+    }
+    .remember-row {
+        margin-top: 16px;
+        display: flex; align-items: center; gap: 8px;
+        font-size: 11px;
+        color: #9fb8a8;
+        letter-spacing: 0.5px;
+    }
+    .remember-row input { accent-color: #5fa8c2; }
+    .footer {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(120,150,150,0.18);
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 9px;
+        color: #5a6a6a;
+        letter-spacing: 1px;
+    }
+    .footer .brand {
+        font-family: 'Courier New', monospace;
+        font-style: italic;
+        color: #7e9690;
+        font-size: 11px;
+    }
+    .footer .copyright { font-size: 9px; }
+    .check-status {
+        font-size: 10px;
+        color: #7ee36c;
+        margin-top: 4px;
+        letter-spacing: 1px;
+        opacity: 0.8;
+    }
+    .check-status.warn { color: #ef9f27; }
+    .check-status.err { color: #ef554f; }
+
+    /* Update modal */
+    .update-overlay{display:none;position:fixed;inset:0;background:rgba(5,8,10,0.85);align-items:center;justify-content:center;z-index:9000;}
+    .update-overlay.visible{display:flex;}
+    .update-box{background:linear-gradient(180deg,#101a1e 0%,#0a1316 100%);border:1px solid rgba(95,168,194,0.55);border-radius:6px;box-shadow:0 8px 40px rgba(0,0,0,0.7),inset 0 1px 0 rgba(255,255,255,0.05);min-width:440px;max-width:500px;overflow:hidden;}
+    .update-header{background:linear-gradient(180deg,#1a2a30 0%,#0e1a1f 100%);border-bottom:1px solid rgba(95,168,194,0.35);padding:12px 20px;display:flex;align-items:center;gap:12px;}
+    .update-header .pulse{width:10px;height:10px;border-radius:50%;background:#7ee36c;box-shadow:0 0 8px rgba(126,227,108,0.8);animation:pulseAnim 1.4s infinite;}
+    @keyframes pulseAnim{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.4;transform:scale(0.7);}}
+    .update-header .title-row{font-size:13px;font-weight:800;letter-spacing:2.5px;color:#7ee36c;text-transform:uppercase;}
+    .update-body{padding:18px 20px;color:#c8d1c8;font-size:12px;line-height:1.6;}
+    .update-body .versions{display:flex;gap:14px;margin:12px 0;font-family:'Courier New',monospace;}
+    .update-body .vchip{flex:1;background:rgba(15,25,28,0.55);border:1px solid rgba(120,150,150,0.25);padding:8px 12px;border-radius:3px;}
+    .update-body .vchip .lbl{font-size:9px;color:#7e9690;letter-spacing:1.5px;text-transform:uppercase;}
+    .update-body .vchip .val{font-size:16px;font-weight:800;margin-top:3px;color:#e8efe8;}
+    .update-body .vchip.new{border-color:rgba(126,227,108,0.45);}
+    .update-body .vchip.new .val{color:#7ee36c;}
+    .update-body .reboot-note{margin-top:10px;padding:8px 12px;background:rgba(239,159,39,0.08);border-left:3px solid #ef9f27;color:#efbf6a;font-size:11px;font-style:italic;line-height:1.5;}
+    .update-progress{margin:14px 0 6px 0;display:none;}
+    .update-progress.visible{display:block;}
+    .update-progress .bar{width:100%;height:8px;background:rgba(20,30,32,0.7);border:1px solid rgba(95,168,194,0.3);border-radius:2px;overflow:hidden;}
+    .update-progress .fill{height:100%;background:linear-gradient(90deg,#5fa8c2,#7ee36c);width:0%;transition:width 200ms ease;}
+    .update-progress .pct{font-size:10px;color:#9fb8a8;margin-top:4px;letter-spacing:1px;text-align:center;}
+    .update-buttons{padding:0 20px 16px 20px;display:flex;gap:10px;justify-content:flex-end;}
+    .update-buttons button{background:linear-gradient(180deg,#1a2528,#0d1417);border:1px solid rgba(120,150,150,0.4);color:#9fb8a8;font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:8px 18px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;}
+    .update-buttons button:hover{border-color:rgba(120,150,150,0.85);}
+    .update-buttons button.primary{background:linear-gradient(180deg,#26404d,#10191d);border-color:rgba(85,185,214,0.85);color:#7ed8f0;font-weight:800;box-shadow:inset 0 0 8px rgba(85,185,214,0.2);}
+    .update-buttons button.primary:hover{border-color:rgba(85,185,214,1);}
+    .update-buttons button:disabled{opacity:0.5;cursor:not-allowed;}
+    .update-error{margin-top:10px;color:#ef554f;font-size:11px;padding:8px 12px;background:rgba(239,85,79,0.08);border-left:3px solid #ef554f;display:none;}
+    .update-error.visible{display:block;}
+</style>
+</head>
+<body>
+    <div class="led-bar">
+        <div class="led on"></div>
+        <div class="led on"></div>
+        <div class="led on"></div>
+        <div class="led amber"></div>
+    </div>
+    <div class="header">
+        <div class="hex"></div>
+        <div class="title-block">
+            <div class="title">MCL-SIT</div>
+            <div class="subtitle">PROJECT — SIT DCS</div>
+        </div>
+        <div class="version-chip" id="version">v17.0.0</div>
+    </div>
+    <div class="check-status" id="checks">SYSTÈME PRÊT</div>
+
+    <div class="question">Mode de lancement</div>
+    <div class="modes">
+        <button class="mode-btn" data-mode="client">
+            <div class="ico">C</div>
+            <div>
+                <div class="label">CLIENT</div>
+                <div class="desc">Se connecter à un serveur SIT existant sur le réseau</div>
+            </div>
+        </button>
+        <button class="mode-btn" data-mode="server">
+            <div class="ico" style="color:#ef9f27;border-color:rgba(239,159,39,0.4);">S</div>
+            <div>
+                <div class="label">SERVEUR</div>
+                <div class="desc">Démarrer le hub SIT sur cette machine — icône zone notification</div>
+            </div>
+        </button>
+        <button class="mode-btn" data-mode="both">
+            <div class="ico" style="color:#5fa8c2;border-color:rgba(95,168,194,0.4);">+</div>
+            <div>
+                <div class="label">CLIENT + SERVEUR</div>
+                <div class="desc">Démarrer le hub local + ouvrir le SIT (PC unique DCS+SIT)</div>
+            </div>
+        </button>
+        <button class="mode-btn" id="mode-maps">
+            <div class="ico" style="color:#a8e6a0;border-color:rgba(168,230,160,0.4);">M</div>
+            <div>
+                <div class="label">BIBLIOTHÈQUE DE CARTES</div>
+                <div class="desc">Gérer les cartes tactiques sans lancer le SIT</div>
+            </div>
+        </button>
+    </div>
+
+    <label class="remember-row">
+        <input type="checkbox" id="remember">
+        Mémoriser ce choix et ne plus demander
+    </label>
+
+    <div class="footer">
+        <div class="brand">MCL-SIT</div>
+        <div class="copyright">131st-Dimitriov</div>
+    </div>
+
+
+    <!-- Update modal: shown only if an update is available -->
+    <div class="update-overlay" id="update-overlay">
+        <div class="update-box">
+            <div class="update-header">
+                <div class="pulse"></div>
+                <div class="title-row">MISE A JOUR DISPONIBLE</div>
+            </div>
+            <div class="update-body">
+                Une nouvelle version de MCL-SIT est disponible.
+                <div class="versions">
+                    <div class="vchip">
+                        <div class="lbl">Version actuelle</div>
+                        <div class="val" id="upd-current">-</div>
+                    </div>
+                    <div class="vchip new">
+                        <div class="lbl">Nouvelle version</div>
+                        <div class="val" id="upd-new">-</div>
+                    </div>
+                </div>
+                <div class="reboot-note">
+                    Important : si DCS World est lance, il faudra le redemarrer apres la mise a jour pour que le hook DCS mis a jour soit pris en compte.
+                </div>
+                <div class="update-progress" id="upd-progress">
+                    <div class="bar"><div class="fill" id="upd-fill"></div></div>
+                    <div class="pct" id="upd-pct">Telechargement en cours...</div>
+                </div>
+                <div class="update-error" id="upd-error"></div>
+            </div>
+            <div class="update-buttons">
+                <button id="upd-later">Plus tard</button>
+                <button class="primary" id="upd-download">Telecharger maintenant</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// IPC bridge exposed by preload.js
+const api = window.sitAPI;
+
+const checksEl = document.getElementById('checks');
+const overlay = document.getElementById('update-overlay');
+const btnDownload = document.getElementById('upd-download');
+const btnLater = document.getElementById('upd-later');
+const progressEl = document.getElementById('upd-progress');
+const fillEl = document.getElementById('upd-fill');
+const pctEl = document.getElementById('upd-pct');
+const errEl = document.getElementById('upd-error');
+
+function setStatusParts(hookStatus, updateMsg) {
+    const parts = [];
+    if (hookStatus === 'ok') parts.push('HOOK DCS OK');
+    else if (hookStatus === 'missing') parts.push('HOOK DCS ABSENT');
+    else if (hookStatus === 'outdated') parts.push('HOOK DCS A METTRE A JOUR');
+    else parts.push('HOOK DCS NON CONFIGURE');
+    if (updateMsg) parts.push(updateMsg);
+    checksEl.textContent = parts.join('  \u00B7  ');
+    if (hookStatus === 'outdated' || hookStatus === 'missing') checksEl.classList.add('warn');
+    else checksEl.classList.remove('warn');
+}
+
+function showUpdateModal(res) {
+    document.getElementById('upd-current').textContent = res.currentVersion;
+    document.getElementById('upd-new').textContent = res.latestVersion;
+    overlay.classList.add('visible');
+}
+
+btnLater.addEventListener('click', () => overlay.classList.remove('visible'));
+
+btnDownload.addEventListener('click', async () => {
+    btnDownload.disabled = true;
+    btnLater.disabled = true;
+    progressEl.classList.add('visible');
+    errEl.classList.remove('visible');
+    errEl.textContent = '';
+    try {
+        api.onUpdateProgress((pct) => {
+            fillEl.style.width = pct + '%';
+            pctEl.textContent = 'Telechargement : ' + pct + '%';
+        });
+        await api.downloadUpdate();
+        pctEl.textContent = 'Telechargement termine - installation imminente...';
+        setTimeout(() => api.quitAndInstall(), 800);
+    } catch(e) {
+        errEl.textContent = 'Echec du telechargement : ' + (e.message || String(e));
+        errEl.classList.add('visible');
+        btnDownload.disabled = false;
+        btnLater.disabled = false;
+        progressEl.classList.remove('visible');
+    }
+});
+
+async function init() {
+    try {
+        const info = await api.getAppInfo();
+        document.getElementById('version').textContent = 'v' + info.version;
+        setStatusParts(info.hookStatus, 'VERIFICATION DES MAJ...');
+        api.checkForUpdates().then((res) => {
+            if (res.devMode) {
+                setStatusParts(info.hookStatus, 'MAJ NON DISPO (DEV)');
+            } else if (res.error) {
+                setStatusParts(info.hookStatus, 'MAJ INDISPONIBLE');
+            } else if (res.hasUpdate) {
+                setStatusParts(info.hookStatus, 'MAJ DISPO ' + res.latestVersion);
+                showUpdateModal(res);
+            } else {
+                setStatusParts(info.hookStatus, 'A JOUR ' + res.currentVersion);
+            }
+        }).catch((e) => {
+            console.error('update check err:', e);
+            setStatusParts(info.hookStatus, 'MAJ - ERREUR');
+        });
+    } catch(e) {
+        console.error('init failed:', e);
+    }
+}
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        overlay.classList.remove('visible');
+        if (btn.id === 'mode-maps') {
+            // Launch maps library standalone — no mode selection persisted
+            api.openMapsLibrary();
+            return;
+        }
+        const mode = btn.dataset.mode;
+        if (!mode) return;
+        const remember = document.getElementById('remember').checked;
+        api.chooseMode(mode, remember);
+    });
+});
+
+init();
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ const serverHost = require('./server-host');
 const hookCheck = require('./hook-check');
 const autoUpdater = require('./auto-updater');
 const logger = require('./logger');
+const mapsLibrary = require('./maps-library');
 
 logger.init();
 
@@ -28,6 +29,10 @@ if (!gotLock) { app.quit(); process.exit(0); }
 
 let splashWindow = null;
 let mainWindow = null;
+let mapsWindow = null;
+// Pending map to load when the SIT renderer is ready (used when "Load" is clicked
+// from the maps library in standalone mode, before the SIT window exists)
+let pendingMapLoad = null;
 let serverWindow = null;
 let logWindow = null;
 let serverPassword = 'Scramble';
@@ -369,6 +374,126 @@ autoUpdater.onProgress((pct) => {
 });
 
 // ----------------------------------------------------------------------------
+// Maps library window
+// ----------------------------------------------------------------------------
+function createMapsWindow() {
+    if (mapsWindow && !mapsWindow.isDestroyed()) {
+        mapsWindow.focus();
+        return;
+    }
+    mapsWindow = new BrowserWindow({
+        width: 980, height: 720,
+        minWidth: 760, minHeight: 500,
+        autoHideMenuBar: true,
+        backgroundColor: '#0a1012',
+        title: 'MCL-SIT — Bibliothèque de cartes',
+        icon: resolveIconPath() || undefined,
+        show: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true, sandbox: true, nodeIntegration: false,
+            devTools: !app.isPackaged
+        }
+    });
+    mapsWindow.setMenu(null);
+    mapsWindow.loadFile(path.join(__dirname, 'maps-window.html'));
+    mapsWindow.once('ready-to-show', () => mapsWindow.show());
+    mapsWindow.on('closed', () => { mapsWindow = null; });
+}
+
+// Maps IPC
+ipcMain.handle('maps:list', () => mapsLibrary.listMaps());
+ipcMain.handle('maps:getThumbnail', (e, id) => mapsLibrary.getThumbnail(id));
+ipcMain.handle('maps:getImage', (e, id) => mapsLibrary.getMapImage(id));
+ipcMain.handle('maps:add', (e, sourcePath, meta) => {
+    try {
+        const entry = mapsLibrary.addMap(sourcePath, meta);
+        return { ok: true, entry };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+ipcMain.handle('maps:update', (e, id, patch) => {
+    try {
+        const entry = mapsLibrary.updateMap(id, patch);
+        return { ok: true, entry };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+ipcMain.handle('maps:delete', (e, id) => {
+    try {
+        return { ok: mapsLibrary.deleteMap(id) };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+ipcMain.handle('maps:pickFile', async () => {
+    const r = await dialog.showOpenDialog({
+        title: 'Choisir une image de carte',
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }],
+        properties: ['openFile']
+    });
+    if (r.canceled || !r.filePaths || r.filePaths.length === 0) return { path: null };
+    const p = r.filePaths[0];
+    return { path: p, name: path.basename(p) };
+});
+ipcMain.handle('maps:readAsDataURL', async (e, filePath) => {
+    try {
+        const buf = fs.readFileSync(filePath);
+        const ext = path.extname(filePath).slice(1).toLowerCase();
+        const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg'
+                   : (ext === 'webp') ? 'image/webp'
+                   : (ext === 'bmp') ? 'image/bmp'
+                   : 'image/png';
+        return { ok: true, dataURL: 'data:' + mime + ';base64,' + buf.toString('base64') };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+ipcMain.handle('maps:load', (e, id) => {
+    // Loading a map = sending it to the SIT renderer.
+    // If the SIT window is open, just send the data.
+    // If not, store as pending and launch the client mode so it picks it up on ready.
+    const list = mapsLibrary.listMaps().maps;
+    const m = list.find(x => x.id === id);
+    if (!m) return { ok: false, error: 'Carte introuvable' };
+    const dataURL = mapsLibrary.getMapImage(id);
+    if (!dataURL) return { ok: false, error: 'Image illisible' };
+    const payload = {
+        id: m.id, name: m.name, dcsMap: m.dcsMap,
+        cornerCoord: m.cornerCoord || '',
+        widthKm: m.widthKm, heightKm: m.heightKm,
+        imgWidth: m.imgWidth, imgHeight: m.imgHeight,
+        dataURL: dataURL
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('maps:loadMap', payload);
+        mainWindow.focus();
+        return { ok: true };
+    }
+    // SIT window not open — store as pending and launch client mode
+    pendingMapLoad = payload;
+    if (splashWindow) { splashWindow.close(); splashWindow = null; }
+    launchMode('client');
+    return { ok: true };
+});
+
+// Splash → open maps standalone
+ipcMain.on('app:openMapsLibrary', () => {
+    if (splashWindow) { splashWindow.close(); splashWindow = null; }
+    createMapsWindow();
+});
+
+// When the SIT renderer signals it is ready, send any pending map
+ipcMain.on('renderer:ready', (e) => {
+    if (pendingMapLoad && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('maps:loadMap', pendingMapLoad);
+        pendingMapLoad = null;
+    }
+});
+
+// ----------------------------------------------------------------------------
 // Lifecycle
 // ----------------------------------------------------------------------------
 app.whenReady().then(() => {
@@ -383,7 +508,7 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', () => {
-    const w = serverWindow || mainWindow || splashWindow;
+    const w = serverWindow || mainWindow || mapsWindow || splashWindow;
     if (w) {
         if (w.isMinimized()) w.restore();
         w.focus();

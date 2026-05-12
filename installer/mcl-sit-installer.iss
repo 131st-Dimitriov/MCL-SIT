@@ -11,7 +11,7 @@
 ;; ============================================================================
 
 #define AppName "MCL-SIT"
-#define AppVersion "16.0.0"
+#define AppVersion "17.0.0"
 #define AppPublisher "131st-Dimitriov"
 #define AppExeName "MCL-SIT.exe"
 #define SourceDir "..\dist\win-unpacked"

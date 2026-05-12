@@ -201,7 +201,7 @@
             <div class="title">MCL-SIT</div>
             <div class="subtitle">PROJECT — SIT DCS</div>
         </div>
-        <div class="version-chip" id="version">v16.0.0</div>
+        <div class="version-chip" id="version">v17.0.0</div>
     </div>
     <div class="check-status" id="checks">SYSTÈME PRÊT</div>
 
@@ -226,6 +226,13 @@
             <div>
                 <div class="label">CLIENT + SERVEUR</div>
                 <div class="desc">Démarrer le hub local + ouvrir le SIT (PC unique DCS+SIT)</div>
+            </div>
+        </button>
+        <button class="mode-btn" id="mode-maps">
+            <div class="ico" style="color:#a8e6a0;border-color:rgba(168,230,160,0.4);">M</div>
+            <div>
+                <div class="label">BIBLIOTHÈQUE DE CARTES</div>
+                <div class="desc">Gérer les cartes tactiques sans lancer le SIT</div>
             </div>
         </button>
     </div>
@@ -360,7 +367,13 @@ async function init() {
 document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         overlay.classList.remove('visible');
+        if (btn.id === 'mode-maps') {
+            // Launch maps library standalone — no mode selection persisted
+            api.openMapsLibrary();
+            return;
+        }
         const mode = btn.dataset.mode;
+        if (!mode) return;
         const remember = document.getElementById('remember').checked;
         api.chooseMode(mode, remember);
     });
