@@ -1,6 +1,6 @@
 {
   "name": "mcl-sit",
-  "version": "17.0.0",
+  "version": "18.0.0",
   "description": "MCL-SIT — Système d'Information Tactique pour DCS World",
   "main": "src/main/main.js",
   "author": "131st-Dimitriov",
@@ -33,7 +33,8 @@
     "asar": true,
     "files": [
       "src/**/*",
-      "!src/lua/**/*"
+      "!src/lua/**/*",
+      "!src/capture/**/*"
     ],
     "asarUnpack": [
       "src/server/**/*",
@@ -45,6 +46,11 @@
         "from": "src/lua",
         "to": "lua",
         "filter": ["**/*.lua"]
+      },
+      {
+        "from": "src/capture",
+        "to": "capture",
+        "filter": ["**/*.py", "requirements.txt"]
       },
       {
         "from": "build/icon.ico",

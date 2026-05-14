@@ -2332,7 +2332,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     <line x1="22" y1="0" x2="28" y2="0" stroke="currentColor" stroke-width="1"/>
                 </svg>
                 <span class="sit-title-full" style="font-size:22px;font-weight:bold;letter-spacing:4px;">MCL<span style="color:#888;"> - </span>SIT</span>
-                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V17</span>
+                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V18</span>
             </div>
             <div id="status">
                 <button onclick="openTutorial()" id="btn-help" data-i18n="btn.help">? AIDE</button>
@@ -9854,6 +9854,10 @@ body.combat-tablet #left-actions.left-actions-hidden,
                         multiConnected=true;
                         statusEl.textContent='';
                         updateConnectionStatus();
+                        // V18: notify main of connection state for the maps library
+                        if (window.sitAPI && window.sitAPI.notifyServerConnectionState) {
+                            window.sitAPI.notifyServerConnectionState({ connected: true, host: ip, port: port, name: name });
+                        }
                         document.getElementById('multi-connect-form').style.display='none';
                         document.getElementById('multi-connected-info').style.display='';
                         document.getElementById('multi-connected-details').textContent=name+' | '+coalition.toUpperCase()+' | '+mode.toUpperCase()+' | '+ip+':'+port;
@@ -10147,6 +10151,30 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 if(msg.type==='clientList'){
                     multiClients=msg.clients||[];
                     updateMultiClientsBar();
+                }
+
+                // V18: server maps pool relay — forward incoming messages to main process
+                // so the maps library window can display them.
+                if (msg.type === 'serverMapsList') {
+                    if (window.sitAPI && window.sitAPI.serverMapsListReceived) {
+                        window.sitAPI.serverMapsListReceived(msg.maps || []);
+                    }
+                }
+                if (msg.type === 'mapUploadResult') {
+                    if (window.sitAPI && window.sitAPI.mapUploadResultReceived) {
+                        window.sitAPI.mapUploadResultReceived(msg);
+                    }
+                }
+                if (msg.type === 'mapDeleteResult') {
+                    if (window.sitAPI && window.sitAPI.mapDeleteResultReceived) {
+                        window.sitAPI.mapDeleteResultReceived(msg);
+                    }
+                }
+                if (msg.type === 'mapDownloadStart' || msg.type === 'mapDownloadChunk' ||
+                    msg.type === 'mapDownloadEnd' || msg.type === 'mapDownloadError') {
+                    if (window.sitAPI && window.sitAPI.mapDownloadMsgReceived) {
+                        window.sitAPI.mapDownloadMsgReceived(msg);
+                    }
                 }
                 
                 // V10: mission reset signal — DCS server changed mission. Wipe all stateful map
@@ -10502,6 +10530,10 @@ body.combat-tablet #left-actions.left-actions-hidden,
             if(multiWS){try{multiWS.close();}catch(e){}}
             multiConnected=false;multiWS=null;
             updateConnectionStatus();
+            // V18: notify main of disconnect
+            if (window.sitAPI && window.sitAPI.notifyServerConnectionState) {
+                window.sitAPI.notifyServerConnectionState({ connected: false });
+            }
             document.getElementById('multi-connect-form').style.display='';
             document.getElementById('multi-connected-info').style.display='none';
             document.getElementById('btn-multi').style.borderColor='#4af';
@@ -10757,6 +10789,18 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     setTimeout(() => window.sitAPI.rendererReady(), 200);
                 }
             }
+            // V18: maps library wants to send a message via the WS
+            if (window.sitAPI && typeof window.sitAPI.onMapsSendWS === 'function') {
+                window.sitAPI.onMapsSendWS((payload) => {
+                    try {
+                        if (multiWS && multiWS.readyState === 1) {
+                            multiWS.send(JSON.stringify(payload));
+                        }
+                    } catch (e) {
+                        console.error('mapsSendWS failed:', e);
+                    }
+                });
+            }
         }
         const status=document.getElementById('status');
         if(status && !document.getElementById('ct-status-coal')){
@@ -10926,7 +10970,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span style="color:#778;">-</span> Système d\'Information Tactique</span>'+
-                '<span class="sit-title-version">V17</span>';
+                '<span class="sit-title-version">V18</span>';
         }
 
         // Marque châssis.
@@ -10967,14 +11011,14 @@ body.combat-tablet #left-actions.left-actions-hidden,
         if(typeof configMenuVisible!=='undefined') configMenuVisible=false;
 
         // Titre logiciel demandé.
-        document.title='MCL-SIT V17';
+        document.title='MCL-SIT V18';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+ 
-                '<span class="sit-title-version">V17</span>';
+                '<span class="sit-title-version">V18</span>';
         }
 
         // Marque châssis.
@@ -11115,14 +11159,14 @@ body.combat-tablet #title .sit-title-version{
         document.body.classList.add('icone','combat-tablet');
 
         // Titre final : MCL - SIT V15, centré dans sa case.
-        document.title='MCL-SIT V17';
+        document.title='MCL-SIT V18';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+
-                '<span class="sit-title-version">V17</span>';
+                '<span class="sit-title-version">V18</span>';
         }
 
         // Sécurise le retrait de CONFIG au cas où une version antérieure le réinjecte.

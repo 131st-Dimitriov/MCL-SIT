@@ -43,5 +43,61 @@ contextBridge.exposeInMainWorld('sitAPI', {
         const listener = (_event, data) => callback(data);
         ipcRenderer.on('maps:loadMap', listener);
     },
-    rendererReady: () => ipcRenderer.send('renderer:ready')
+    rendererReady: () => ipcRenderer.send('renderer:ready'),
+
+    // V18 — server maps relay (SIT renderer side)
+    notifyServerConnectionState: (state) => ipcRenderer.send('maps:notifyServerConnectionState', state),
+    serverMapsListReceived: (list) => ipcRenderer.send('maps:serverMapsListReceived', list),
+    mapUploadResultReceived: (msg) => ipcRenderer.send('maps:mapUploadResultReceived', msg),
+    mapDeleteResultReceived: (msg) => ipcRenderer.send('maps:mapDeleteResultReceived', msg),
+    mapDownloadMsgReceived: (msg) => ipcRenderer.send('maps:mapDownloadMsgReceived', msg),
+    onMapsSendWS: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+        ipcRenderer.on('maps:sendWS', listener);
+    },
+
+    // V18 — server maps (maps library window side)
+    getServerConnectionState: () => ipcRenderer.invoke('maps:getServerConnectionState'),
+    getServerMapsList: () => ipcRenderer.invoke('maps:getServerMapsList'),
+    mapsPublishToServer: (id) => ipcRenderer.invoke('maps:publishToServer', id),
+    mapsDownloadFromServer: (id) => ipcRenderer.invoke('maps:downloadFromServer', id),
+    mapsDeleteFromServer: (id) => ipcRenderer.invoke('maps:deleteFromServer', id),
+    onServerConnectionState: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('maps:serverConnectionState', listener);
+    },
+    onServerMapsList: (callback) => {
+        const listener = (_event, list) => callback(list);
+        ipcRenderer.on('maps:serverMapsList', listener);
+    },
+    onMapDownloadProgress: (callback) => {
+        const listener = (_event, info) => callback(info);
+        ipcRenderer.on('maps:downloadProgress', listener);
+    },
+    onMapUploadProgress: (callback) => {
+        const listener = (_event, info) => callback(info);
+        ipcRenderer.on('maps:uploadProgress', listener);
+    },
+    onLocalLibraryChanged: (callback) => {
+        const listener = () => callback();
+        ipcRenderer.on('maps:localLibraryChanged', listener);
+    },
+
+    // V18 — capture
+    openCaptureWindow: () => ipcRenderer.send('app:openCaptureWindow'),
+    captureCheckPython: () => ipcRenderer.invoke('capture:checkPython'),
+    captureSetupPython: () => ipcRenderer.invoke('capture:setupPython'),
+    captureRun: (params) => ipcRenderer.invoke('capture:run', params),
+    captureCancel: () => ipcRenderer.invoke('capture:cancel'),
+    captureSaveToLibrary: (opts) => ipcRenderer.invoke('capture:saveToLibrary', opts),
+    captureCleanupIntermediates: (paths) => ipcRenderer.invoke('capture:cleanupIntermediates', paths),
+    captureOpenFolder: (folder) => ipcRenderer.send('capture:openFolder', folder),
+    onCaptureSetupProgress: (callback) => {
+        const listener = (_event, info) => callback(info);
+        ipcRenderer.on('capture:setupProgress', listener);
+    },
+    onCaptureLog: (callback) => {
+        const listener = (_event, line) => callback(line);
+        ipcRenderer.on('capture:log', listener);
+    }
 });

@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>MCL-SIT — Capture de carte</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+        width: 100%; height: 100%;
+        background: radial-gradient(circle at 30% 30%, #15252b 0%, #0a1012 70%, #050708 100%);
+        font-family: 'Courier New', monospace;
+        color: #c8d1c8;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    body { display: flex; flex-direction: column; padding: 14px 20px; }
+    .led-bar { display: flex; gap: 7px; margin-bottom: 8px; }
+    .led { width: 10px; height: 10px; border-radius: 50%; background: #1a2528; border: 1px solid #2a3a3d; }
+    .led.on { background: #7ee36c; border-color: #5fa860; box-shadow: 0 0 6px rgba(126,227,108,0.6); }
+    .led.amber { background: #ef9f27; border-color: #b07820; box-shadow: 0 0 5px rgba(239,159,39,0.5); }
+    .header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .header .hex {
+        width: 28px; height: 28px; background: #0c1517;
+        border: 2px solid #ef9f27;
+        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    }
+    .header .hex::after { content: ''; display: block; width: 10px; height: 10px; margin: 7px auto; background: #ef9f27; border-radius: 50%; }
+    .title { font-size: 18px; font-weight: 900; letter-spacing: 4px; color: #e8efe8; }
+    .subtitle { font-size: 9px; font-weight: 700; color: #ef9f27; letter-spacing: 3px; margin-top: 1px; }
+
+    /* Stepper */
+    .stepper { display: flex; gap: 4px; margin-bottom: 12px; }
+    .step {
+        flex: 1;
+        text-align: center;
+        padding: 6px 10px;
+        background: rgba(15,25,28,0.55);
+        border: 1px solid rgba(120,150,150,0.25);
+        font-size: 9px;
+        letter-spacing: 1px;
+        color: #7e9690;
+    }
+    .step.active {
+        background: linear-gradient(180deg, #1a2a30, #0e1a1f);
+        border-color: rgba(95,168,194,0.65);
+        color: #5fa8c2;
+        font-weight: 800;
+    }
+    .step.done { color: #7ee36c; border-color: rgba(126,227,108,0.45); }
+    .step .num { font-size: 12px; font-weight: 900; margin-right: 4px; }
+
+    /* Panels */
+    .panel {
+        flex: 1;
+        background: rgba(10,18,20,0.5);
+        border: 1px solid rgba(120,150,150,0.18);
+        padding: 14px 18px;
+        overflow-y: auto;
+        display: none;
+    }
+    .panel.active { display: block; }
+    .panel h2 {
+        font-size: 12px; font-weight: 800;
+        color: #5fa8c2; letter-spacing: 2px;
+        margin-bottom: 12px; text-transform: uppercase;
+    }
+    .panel p { font-size: 11px; line-height: 1.5; margin-bottom: 10px; }
+
+    /* 2-column layout for params step */
+    .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        height: calc(100% - 50px);
+        overflow: hidden;
+    }
+    .two-col .col-left, .two-col .col-right {
+        overflow-y: auto;
+        padding-right: 6px;
+    }
+    .two-col .col-right {
+        background: rgba(15,25,28,0.4);
+        border-left: 2px solid rgba(95,168,194,0.25);
+        padding-left: 14px;
+    }
+    .two-col .col-right h3 {
+        font-size: 11px; color: #ef9f27;
+        letter-spacing: 1.5px;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        font-weight: 800;
+    }
+    .two-col .col-right ol {
+        padding-left: 18px;
+        font-size: 11px;
+        line-height: 1.55;
+        color: #b8c8b8;
+    }
+    .two-col .col-right ol li {
+        margin-bottom: 6px;
+    }
+    .two-col .col-right ol li strong { color: #e8efe8; }
+    .two-col .col-right ol li code {
+        background: rgba(95,168,194,0.12);
+        color: #7ed8f0;
+        padding: 1px 4px;
+        font-size: 10px;
+        border-radius: 2px;
+    }
+
+    .info-box {
+        padding: 10px 12px;
+        background: rgba(95,168,194,0.06);
+        border-left: 3px solid #5fa8c2;
+        margin-bottom: 10px;
+        font-size: 11px;
+        line-height: 1.5;
+    }
+    .info-box.warn { background: rgba(239,159,39,0.06); border-left-color: #ef9f27; }
+    .info-box.error { background: rgba(239,85,79,0.08); border-left-color: #ef554f; color: #efbf85; }
+    .info-box ul { padding-left: 18px; margin-top: 4px; }
+    .info-box li { margin-bottom: 3px; }
+
+    .form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+    .form-row label { font-size: 9px; color: #7e9690; letter-spacing: 1.2px; text-transform: uppercase; }
+    .form-row input, .form-row select {
+        background: #0a1316; color: #e8efe8;
+        border: 1px solid rgba(95,168,194,0.4);
+        padding: 7px 9px;
+        font-family: inherit; font-size: 11px;
+    }
+    .form-row input:focus, .form-row select:focus { outline: none; border-color: rgba(95,168,194,0.85); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .progress-bar {
+        height: 12px;
+        background: rgba(20,30,32,0.7);
+        border: 1px solid rgba(95,168,194,0.3);
+        overflow: hidden;
+        margin: 8px 0;
+    }
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #5fa8c2, #7ee36c);
+        width: 0%;
+        transition: width 200ms ease;
+    }
+    .progress-text { font-size: 10px; color: #9fb8a8; margin-top: 4px; }
+
+    .log-box {
+        background: #0a1012;
+        border: 1px solid rgba(120,150,150,0.2);
+        padding: 9px;
+        height: 280px;
+        overflow-y: auto;
+        font-size: 10px;
+        font-family: 'Courier New', monospace;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        color: #9fb8a8;
+        margin-top: 8px;
+    }
+    .log-box .line { line-height: 1.4; }
+    .log-box .line.err { color: #ef9f27; }
+
+    .actions {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(120,150,150,0.18);
+        display: flex; gap: 8px; justify-content: flex-end;
+    }
+    .btn {
+        background: linear-gradient(180deg, #16252a, #0a1316);
+        border: 1px solid rgba(95,168,194,0.4);
+        color: #c8d1c8;
+        font-family: inherit; font-size: 10px;
+        padding: 8px 16px;
+        letter-spacing: 1.5px; cursor: pointer;
+        text-transform: uppercase;
+    }
+    .btn:hover { border-color: rgba(95,168,194,0.85); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.primary {
+        color: #7ed8f0; border-color: rgba(85,185,214,0.85);
+        font-weight: 800;
+        box-shadow: inset 0 0 8px rgba(85,185,214,0.2);
+    }
+    .btn.primary:hover { border-color: rgba(85,185,214,1); }
+    .btn.danger { color: #ef554f; border-color: rgba(239,85,79,0.5); }
+    .btn.danger:hover { border-color: rgba(239,85,79,0.95); }
+
+    /* Cleanup modal */
+    .modal-overlay {
+        display: none; position: fixed; inset: 0;
+        background: rgba(5,8,10,0.85);
+        align-items: center; justify-content: center;
+        z-index: 1000;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-box {
+        background: linear-gradient(180deg, #101a1e 0%, #0a1316 100%);
+        border: 1px solid rgba(95,168,194,0.55);
+        min-width: 520px; max-width: 640px;
+        padding: 18px 22px;
+    }
+    .modal-box h3 {
+        font-size: 13px; color: #5fa8c2;
+        letter-spacing: 2px; text-transform: uppercase;
+        margin-bottom: 12px;
+    }
+    .modal-box .paths {
+        background: #0a1012;
+        border: 1px solid rgba(120,150,150,0.2);
+        padding: 8px 10px;
+        font-size: 10px;
+        margin-bottom: 10px;
+        font-family: 'Courier New', monospace;
+        color: #9fb8a8;
+    }
+    .modal-box .paths div { margin-bottom: 3px; word-break: break-all; }
+    /* Recalage pulse indicator */
+    .rec-pulse {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #5fa8c2;
+        box-shadow: 0 0 10px rgba(95,168,194,0.85);
+        animation: recPulseAnim 1.4s infinite;
+    }
+    @keyframes recPulseAnim {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.35; transform: scale(0.65); }
+    }
+</style>
+</head>
+<body>
+    <div class="led-bar">
+        <div class="led on"></div>
+        <div class="led on"></div>
+        <div class="led amber"></div>
+        <div class="led amber"></div>
+    </div>
+    <div class="header">
+        <div class="hex"></div>
+        <div>
+            <div class="title">CAPTURE DE CARTE</div>
+            <div class="subtitle">MCL-SIT — V18</div>
+        </div>
+    </div>
+
+    <div class="stepper" id="stepper">
+        <div class="step active" data-step="setup"><span class="num">1</span>PYTHON</div>
+        <div class="step" data-step="params"><span class="num">2</span>PARAMÈTRES</div>
+        <div class="step" data-step="capture"><span class="num">3</span>CAPTURE</div>
+        <div class="step" data-step="result"><span class="num">4</span>RÉSULTAT</div>
+    </div>
+
+    <!-- Step 1: Python setup -->
+    <div class="panel active" id="panel-setup">
+        <h2>Vérification de l'environnement Python</h2>
+        <p>MCL-SIT utilise Python pour la capture et le recalage des cartes.</p>
+        <div class="info-box" id="setup-status">Vérification en cours...</div>
+        <div class="progress-bar" id="setup-progress" style="display:none;">
+            <div class="progress-fill" id="setup-fill"></div>
+        </div>
+        <div class="progress-text" id="setup-progress-text"></div>
+        <div class="actions">
+            <button class="btn" id="btn-setup-cancel">Annuler</button>
+            <button class="btn primary" id="btn-setup-install" style="display:none;">Installer Python</button>
+            <button class="btn primary" id="btn-setup-next" style="display:none;">Suivant</button>
+        </div>
+    </div>
+
+    <!-- Step 2: Params (2 columns) -->
+    <div class="panel" id="panel-params">
+        <h2>Paramètres de la capture</h2>
+        <div class="two-col">
+            <div class="col-left">
+                <div class="form-row">
+                    <label>Nom de la capture (sans accents ni espaces)</label>
+                    <input type="text" id="p-name" placeholder="ex: caire" maxlength="60" />
+                </div>
+                <div class="form-row">
+                    <label>Carte DCS</label>
+                    <select id="p-dcs"></select>
+                </div>
+                <div class="form-row">
+                    <label>Coord. coin haut-gauche (DCS "Lat Long Decimal Minutes")</label>
+                    <input type="text" id="p-coord" placeholder="N 34°23.203' E 35°39.847'" />
+                </div>
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Largeur visible (km)</label>
+                        <input type="number" id="p-visible" step="0.001" placeholder="5.653" />
+                    </div>
+                    <div class="form-row">
+                        <label>Largeur zone (km)</label>
+                        <input type="number" id="p-area-w" step="0.1" placeholder="20" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label>Zone carrée ?</label>
+                    <select id="p-square">
+                        <option value="yes">Oui (hauteur = 2 × largeur, format SIT classique)</option>
+                        <option value="no">Non, saisir la hauteur</option>
+                    </select>
+                </div>
+                <div class="form-row" id="row-area-h" style="display:none;">
+                    <label>Hauteur zone (km)</label>
+                    <input type="number" id="p-area-h" step="0.1" placeholder="20" />
+                </div>
+                <div class="form-grid">
+                    <div class="form-row">
+                        <label>Résolution écran X</label>
+                        <input type="number" id="p-screen-w" value="3840" />
+                    </div>
+                    <div class="form-row">
+                        <label>Résolution écran Y</label>
+                        <input type="number" id="p-screen-h" value="2160" />
+                    </div>
+                </div>
+                <div class="info-box" id="estimate-box" style="display:none;">
+                    <strong>Estimation :</strong> <span id="estimate-text"></span>
+                </div>
+            </div>
+            <div class="col-right">
+                <h3>Procédure dans DCS</h3>
+                <p style="font-size:10px;color:#9fb8a8;margin-bottom:10px;">
+                    Pour être certain que tout est correct, suivez cette procédure dans l'éditeur de mission DCS :
+                </p>
+                <ol>
+                    <li>Déterminez la zone que vous voulez cartographier.</li>
+                    <li>Activez la <strong>grille MGRS</strong> (conseillé pour de meilleurs résultats).</li>
+                    <li>Placez une <strong>zone de trigger</strong> sur la carte, mettez le rayon approprié pour englober la zone à prendre. Réglez-la ensuite de <code>circulaire</code> à <code>4 points</code>. Notez ses dimensions <em>(si rayon = 5000, la taille à renseigner sera 10 ou le double)</em>.</li>
+                    <li>Remplissez <strong>« Largeur zone »</strong> à gauche.</li>
+                    <li>Placez 4 statiques <strong>« manche à air »</strong> (icône triangle BLEU) aux 4 coins de la zone le plus précisément possible.</li>
+                    <li>Récupérez les coordonnées du <strong>coin supérieur gauche</strong> (<code>CTRL+Y</code> sur la position du coin) en format <strong>"Lat Long Decimal Minutes"</strong>.</li>
+                    <li>Collez-les dans le champ <strong>« Coord. coin haut-gauche »</strong>.</li>
+                    <li>Supprimez la zone de trigger, placez-vous à un <strong>zoom convenable</strong> sur le coin supérieur gauche, avec le coin vers le haut-droite de votre écran (<code>1/4 largeur</code>, <code>3/4 hauteur</code>).</li>
+                    <li>Mesurez la <strong>largeur de votre fenêtre de droite à gauche</strong> avec <strong>clic molette maintenu</strong>.</li>
+                    <li>Renseignez <strong>« Largeur visible »</strong> (en km, attention).</li>
+                    <li>Remplissez le reste des champs puis cliquez <strong>Lancer la capture</strong>.</li>
+                </ol>
+                <div style="margin-top:10px;font-size:9px;color:#7e9690;letter-spacing:1px;text-transform:uppercase;">Format attendu pour la coordonnée :</div>
+                <img src="data:image/jpeg;base64,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" alt="DCS Lat Long Decimal Minutes" style="width:100%;border:1px solid rgba(95,168,194,0.3);margin-top:6px;" />
+                <div class="info-box warn" style="margin-top:12px;">
+                    <strong>ARRÊT D'URGENCE :</strong> 3× <code>ÉCHAP</code> en moins de 2 secondes.
+                </div>
+                <div class="info-box" style="margin-top:8px;font-size:10px;">
+                    Une fois lancée, ne touchez plus à la souris ni au clavier. Gardez DCS au premier plan, ne changez pas le zoom.
+                </div>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="btn" id="btn-params-back">Retour</button>
+            <button class="btn primary" id="btn-params-next">Lancer la capture</button>
+        </div>
+    </div>
+
+    <!-- Step 3: Capture -->
+    <div class="panel" id="panel-capture">
+        <h2>Capture en cours</h2>
+
+        <!-- Sub-step A: countdown -->
+        <div id="capture-countdown-block">
+            <div class="info-box warn">
+                <strong>BASCULE MAINTENANT SUR DCS.</strong>
+                La capture démarre à la fin du décompte. Une fois lancée, ne touche plus à la souris ni au clavier.
+                Pour annuler : 3× ÉCHAP en moins de 2 secondes.
+            </div>
+            <div style="text-align:center;padding:30px 20px;">
+                <div id="capture-countdown-num" style="font-size:96px;font-weight:900;color:#ef9f27;text-shadow:0 0 30px rgba(239,159,39,0.6);letter-spacing:4px;">10</div>
+                <div style="font-size:13px;letter-spacing:2px;color:#c8d1c8;font-weight:700;margin-top:6px;">PLACE-TOI EN PLEIN ÉCRAN SUR DCS</div>
+            </div>
+        </div>
+
+        <!-- Sub-step B: capture progress (shown after countdown) -->
+        <div id="capture-progress-block" style="display:none;">
+            <div class="info-box warn">
+                <strong>CAPTURE EN COURS — NE TOUCHE PAS.</strong> 3× ÉCHAP pour arrêter.
+            </div>
+            <div class="progress-text" id="capture-phase" style="font-size:11px;font-weight:700;color:#5fa8c2;margin-top:6px;">Phase 1 — Capture des tuiles</div>
+            <div class="progress-bar" style="margin-top:8px;height:14px;">
+                <div class="progress-fill" id="capture-fill"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px;">
+                <div><span style="color:#7e9690;">Tuile :</span> <span id="capture-tile" style="color:#e8efe8;font-weight:700;">— / —</span></div>
+                <div><span style="color:#7e9690;">Temps restant estimé :</span> <span id="capture-eta" style="color:#e8efe8;font-weight:700;">—</span></div>
+            </div>
+            <div id="capture-recalage-info" style="display:none;margin-top:14px;font-size:11px;color:#9fb8a8;line-height:1.6;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                    <div class="rec-pulse"></div>
+                    <strong style="color:#5fa8c2;">Phase 2 — Recalage et assemblage</strong>
+                </div>
+                <div style="font-size:11px;color:#b8c8b8;margin-bottom:8px;">
+                    Le recalage utilise OpenCV pour réaligner les tuiles capturées, détecter les marqueurs « manche à air » bleus, et compresser l'image finale.
+                    <strong style="color:#e8efe8;">Cette étape est sans interaction</strong>, le programme tourne en autonome — laisse-le finir.
+                </div>
+                <div style="font-size:10px;color:#7e9690;background:rgba(15,25,28,0.5);padding:6px 10px;border-left:2px solid rgba(95,168,194,0.4);margin-bottom:8px;">
+                    <strong style="color:#9fb8a8;">Durées indicatives :</strong>
+                    100 tuiles → ~2 min &nbsp;·&nbsp; 1000 tuiles → ~30 min &nbsp;·&nbsp; 5000 tuiles → ~2 h
+                </div>
+                <div id="capture-recalage-status" style="font-size:11px;color:#7ed8f0;font-weight:700;margin-bottom:6px;">Démarrage du recalage…</div>
+                <div id="capture-recalage-feed" style="background:#0a1012;border:1px solid rgba(120,150,150,0.2);padding:8px 10px;max-height:160px;overflow-y:auto;font-size:10px;color:#9fb8a8;line-height:1.5;"></div>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button class="btn danger" id="btn-capture-cancel">Forcer l'arrêt</button>
+        </div>
+    </div>
+
+    <!-- Step 4: Result -->
+    <div class="panel" id="panel-result">
+        <h2 id="result-title">Capture terminée</h2>
+        <div class="info-box" id="result-info"></div>
+        <div class="info-box error" id="result-error" style="display:none;"></div>
+        <div class="actions">
+            <button class="btn" id="btn-result-close">Fermer sans enregistrer</button>
+            <button class="btn primary" id="btn-result-save">Enregistrer dans la bibliothèque</button>
+        </div>
+    </div>
+
+    <!-- Cleanup confirmation modal -->
+    <div class="modal-overlay" id="cleanup-modal">
+        <div class="modal-box">
+            <h3>Nettoyer les fichiers temporaires ?</h3>
+            <p style="font-size:11px;line-height:1.5;margin-bottom:10px;">
+                La capture est enregistrée dans la bibliothèque. Les fichiers temporaires (tuiles brutes, fichiers de recalage) peuvent maintenant être supprimés.
+            </p>
+            <div class="paths" id="cleanup-paths"></div>
+            <p style="font-size:11px;color:#ef9f27;margin-bottom:10px;">
+                Taille à libérer : <strong id="cleanup-size">— Mo</strong>
+            </p>
+            <!-- V18: warning shown only when totalTiles > 250 -->
+            <div id="cleanup-bigcap-warning" style="display:none;background:rgba(239,159,39,0.08);border-left:3px solid #ef9f27;padding:10px 12px;margin-bottom:10px;font-size:11px;line-height:1.6;color:#efbf85;">
+                <strong style="color:#ef9f27;">Suppression déconseillée :</strong>
+                votre capture est volumineuse (<span id="cleanup-bigcap-count">—</span> tuiles).
+                Vérifiez d'abord la <strong>qualité de l'image finale</strong> dans la bibliothèque.
+                Le fichier final est le <strong>JPEG le plus léger</strong>.<br><br>
+                Vous pouvez sinon employer une <strong>brute plus large</strong> (à recadrer et redimensionner sous Gimp/Photoshop) située dans le dossier de recalage :
+                <div style="margin-top:6px;">
+                    <a href="#" id="cleanup-bigcap-openfolder" style="color:#7ed8f0;text-decoration:underline;font-family:'Courier New',monospace;font-size:10px;word-break:break-all;">Ouvrir le dossier</a>
+                </div>
+            </div>
+            <div class="actions" style="border-top:none;padding-top:0;">
+                <button class="btn" id="cleanup-keep">Garder les fichiers</button>
+                <button class="btn primary" id="cleanup-delete">Supprimer maintenant</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Big capture warning modal (>1000 tiles) -->
+    <div class="modal-overlay" id="bigcap-modal">
+        <div class="modal-box" style="border-color:rgba(239,85,79,0.85);box-shadow:0 0 30px rgba(239,85,79,0.4);max-width:680px;">
+            <h3 style="color:#ef554f;font-size:14px;letter-spacing:2px;">⚠ ATTENTION — CAPTURE GIGANTESQUE</h3>
+            <div id="bigcap-message" style="background:rgba(239,85,79,0.08);border:1px solid rgba(239,85,79,0.4);padding:18px 22px;margin-bottom:14px;">
+                <p style="font-size:18px;font-weight:900;color:#ef554f;line-height:1.5;text-align:center;letter-spacing:1px;">
+                    Ehehe, je vois où tu veux aller avec ça, mais je te préviens :<br>
+                    ce soft n'est pas pensé pour une capture complète de map,<br>
+                    il est probable que le recalage foire en partie.<br><br>
+                    Enfin, c'est ta facture d'électricité, pas la mienne :p
+                </p>
+            </div>
+            <p style="font-size:11px;color:#9fb8a8;margin-bottom:8px;">
+                <strong>Capture demandée :</strong> <span id="bigcap-count">—</span> tuiles
+                — durée estimée : <span id="bigcap-eta">—</span>
+            </p>
+            <div class="actions" style="border-top:none;padding-top:6px;">
+                <button class="btn" id="bigcap-cancel">Annuler — réduire la zone</button>
+                <button class="btn danger" id="bigcap-confirm">Je confirme, lance la bête</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+const api = window.sitAPI;
+const DCS_MAPS = ['Caucase', 'Nevada (NTTR)', 'Normandie', 'Persian Gulf', 'Syrie',
+                  'Mariannes', 'Afghanistan', 'Sinaï', 'Kola', 'South Atlantic',
+                  'Iraq', 'Germany Cold War', 'Autre'];
+
+let captureResult = null;
+let pendingMeta = null; // params from step 2 used at save time
+
+function setStep(name) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    const steps = ['setup', 'params', 'capture', 'result'];
+    const idx = steps.indexOf(name);
+    document.querySelectorAll('.step').forEach(s => {
+        const sIdx = steps.indexOf(s.dataset.step);
+        s.classList.toggle('active', sIdx === idx);
+        s.classList.toggle('done', sIdx < idx);
+    });
+}
+
+function fmtBytes(b) {
+    if (b < 1024) return b + ' o';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' Ko';
+    if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1) + ' Mo';
+    return (b/1024/1024/1024).toFixed(2) + ' Go';
+}
+
+// Populate DCS dropdown
+for (const m of DCS_MAPS) {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    document.getElementById('p-dcs').appendChild(o);
+}
+
+// =====================================================
+// Step 1 — Python setup
+// =====================================================
+async function checkPython() {
+    const status = document.getElementById('setup-status');
+    const btnInstall = document.getElementById('btn-setup-install');
+    const btnNext = document.getElementById('btn-setup-next');
+    const installed = await api.captureCheckPython();
+    if (installed && installed.ok) {
+        status.textContent = 'Python est installé et opérationnel.';
+        status.className = 'info-box';
+        btnNext.style.display = '';
+        btnInstall.style.display = 'none';
+    } else {
+        status.innerHTML = 'Python doit être installé (~80 Mo téléchargés depuis python.org et PyPI). <br>' +
+            'Cette opération est faite <strong>une seule fois</strong>, elle prend 1 à 3 minutes selon ta connexion.';
+        status.className = 'info-box warn';
+        btnInstall.style.display = '';
+        btnNext.style.display = 'none';
+    }
+}
+document.getElementById('btn-setup-install').addEventListener('click', async () => {
+    const status = document.getElementById('setup-status');
+    const progress = document.getElementById('setup-progress');
+    const fill = document.getElementById('setup-fill');
+    const txt = document.getElementById('setup-progress-text');
+    document.getElementById('btn-setup-install').disabled = true;
+    progress.style.display = '';
+    api.onCaptureSetupProgress((info) => {
+        if (info.phase === 'error') {
+            status.textContent = 'Erreur : ' + info.message;
+            status.className = 'info-box error';
+            document.getElementById('btn-setup-install').disabled = false;
+        } else {
+            status.textContent = info.message;
+            status.className = 'info-box';
+        }
+        fill.style.width = (info.pct || 0) + '%';
+        txt.textContent = (info.pct || 0) + '%';
+    });
+    const r = await api.captureSetupPython();
+    if (r && r.ok) {
+        status.textContent = 'Python installé.';
+        status.className = 'info-box';
+        document.getElementById('btn-setup-next').style.display = '';
+        document.getElementById('btn-setup-install').style.display = 'none';
+    } else {
+        status.textContent = 'Échec : ' + (r && r.error || 'inconnu');
+        status.className = 'info-box error';
+        document.getElementById('btn-setup-install').disabled = false;
+    }
+});
+document.getElementById('btn-setup-cancel').addEventListener('click', () => window.close());
+document.getElementById('btn-setup-next').addEventListener('click', () => setStep('params'));
+
+// =====================================================
+// Step 2 — Params
+// =====================================================
+function updateEstimate() {
+    const visible = parseFloat(document.getElementById('p-visible').value);
+    const areaW = parseFloat(document.getElementById('p-area-w').value);
+    const square = document.getElementById('p-square').value === 'yes';
+    let areaH;
+    if (square) areaH = areaW * 2;
+    else areaH = parseFloat(document.getElementById('p-area-h').value);
+    if (!visible || !areaW || !areaH) {
+        document.getElementById('estimate-box').style.display = 'none';
+        return;
+    }
+    const tilesX = Math.ceil(areaW / (0.9 * visible));
+    const tilesY = square ? 2 * tilesX : Math.ceil((2 * areaH) / (0.9 * visible));
+    const total = tilesX * tilesY;
+    const seconds = total * 1.35 + (tilesY * (tilesX - 1) + (tilesY - 1)) * 1.7;
+    const min = Math.floor(seconds / 60), sec = Math.floor(seconds % 60);
+    document.getElementById('estimate-text').textContent =
+        'Grille ' + tilesX + ' × ' + tilesY + ' = ' + total + ' tuiles · ~' + min + ' min ' + sec + ' s';
+    document.getElementById('estimate-box').style.display = '';
+}
+document.getElementById('p-square').addEventListener('change', () => {
+    document.getElementById('row-area-h').style.display =
+        document.getElementById('p-square').value === 'no' ? '' : 'none';
+    updateEstimate();
+});
+['p-visible', 'p-area-w', 'p-area-h'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateEstimate);
+});
+document.getElementById('btn-params-back').addEventListener('click', () => setStep('setup'));
+document.getElementById('btn-params-next').addEventListener('click', () => {
+    const name = document.getElementById('p-name').value.trim();
+    const dcs = document.getElementById('p-dcs').value;
+    const coord = document.getElementById('p-coord').value.trim();
+    const visible = parseFloat(document.getElementById('p-visible').value);
+    const areaW = parseFloat(document.getElementById('p-area-w').value);
+    const square = document.getElementById('p-square').value === 'yes';
+    const areaH = square ? 'square' : parseFloat(document.getElementById('p-area-h').value);
+    const areaHNum = square ? areaW : parseFloat(document.getElementById('p-area-h').value);  // FIX V18.1: square = same width, not 2×
+    const sw = parseInt(document.getElementById('p-screen-w').value, 10);
+    const sh = parseInt(document.getElementById('p-screen-h').value, 10);
+    if (!name) return alert('Saisis un nom de capture');
+    if (!coord) return alert('Saisis la coordonnée du coin haut-gauche');
+    if (!visible || visible <= 0) return alert('Largeur visible invalide');
+    if (!areaW || areaW <= 0) return alert('Largeur zone invalide');
+    if (!square && (!areaHNum || areaHNum <= 0)) return alert('Hauteur zone invalide');
+    if (sw < 640) return alert('Résolution X invalide');
+    if (sh < 480) return alert('Résolution Y invalide');
+    pendingMeta = { name, dcsMap: dcs, cornerCoord: coord, visibleKm: visible, areaWidthKm: areaW, areaHeightKm: areaH, areaHeightNum: areaHNum, screenW: sw, screenH: sh };
+
+    // Compute tile count and gate on >1000 with a big warning modal
+    const tilesX = Math.ceil(areaW / (0.9 * visible));
+    const tilesY = square ? 2 * tilesX : Math.ceil((2 * areaHNum) / (0.9 * visible));
+    const totalTiles = tilesX * tilesY;
+    if (totalTiles > 1000) {
+        const seconds = totalTiles * 1.35 + (tilesY * (tilesX - 1) + (tilesY - 1)) * 1.7;
+        const min = Math.floor(seconds / 60), sec = Math.floor(seconds % 60);
+        document.getElementById('bigcap-count').textContent = totalTiles;
+        document.getElementById('bigcap-eta').textContent = (min > 60 ? Math.floor(min/60) + ' h ' + (min%60) + ' min' : min + ' min ' + sec + ' s');
+        document.getElementById('bigcap-modal').classList.add('visible');
+        return;
+    }
+    setStep('capture');
+    startCountdownThenCapture();
+});
+
+document.getElementById('bigcap-cancel').addEventListener('click', () => {
+    document.getElementById('bigcap-modal').classList.remove('visible');
+});
+document.getElementById('bigcap-confirm').addEventListener('click', () => {
+    document.getElementById('bigcap-modal').classList.remove('visible');
+    setStep('capture');
+    startCountdownThenCapture();
+});
+
+// =====================================================
+// Step 3 — Capture (countdown + progress)
+// =====================================================
+let countdownTimer = null;
+let captureStartedAt = 0;
+let captureTotalTiles = 0;
+let captureLastTile = 0;
+let etaTimer = null;
+
+function startCountdownThenCapture() {
+    document.getElementById('capture-countdown-block').style.display = '';
+    document.getElementById('capture-progress-block').style.display = 'none';
+    let n = 10;
+    document.getElementById('capture-countdown-num').textContent = n;
+    countdownTimer = setInterval(() => {
+        n--;
+        if (n > 0) {
+            document.getElementById('capture-countdown-num').textContent = n;
+        } else {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+            document.getElementById('capture-countdown-block').style.display = 'none';
+            document.getElementById('capture-progress-block').style.display = '';
+            runCapture();
+        }
+    }, 1000);
+}
+
+function fmtDuration(seconds) {
+    if (!isFinite(seconds) || seconds < 0) return '—';
+    if (seconds < 60) return Math.round(seconds) + ' s';
+    const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
+    return m + ' min ' + (s < 10 ? '0' + s : s) + ' s';
+}
+
+function updateETA() {
+    if (!captureStartedAt || !captureTotalTiles || captureLastTile === 0) return;
+    const elapsedMs = Date.now() - captureStartedAt;
+    const ratio = captureLastTile / captureTotalTiles;
+    const totalMs = elapsedMs / ratio;
+    const remainingMs = totalMs - elapsedMs;
+    document.getElementById('capture-eta').textContent = fmtDuration(remainingMs / 1000);
+}
+
+async function runCapture() {
+    const fillEl = document.getElementById('capture-fill');
+    const phaseEl = document.getElementById('capture-phase');
+    const tileEl = document.getElementById('capture-tile');
+    const etaEl = document.getElementById('capture-eta');
+    const recalageInfo = document.getElementById('capture-recalage-info');
+    const recalageStatusEl = document.getElementById('capture-recalage-status');
+    const recalageFeedEl = document.getElementById('capture-recalage-feed');
+
+    let inRecalage = false;
+
+    captureStartedAt = Date.now();
+    captureLastTile = 0;
+    captureTotalTiles = 0;
+    fillEl.style.width = '0%';
+    tileEl.textContent = '— / —';
+    etaEl.textContent = 'Calcul en cours…';
+    recalageFeedEl.innerHTML = '';
+
+    if (etaTimer) clearInterval(etaTimer);
+    etaTimer = setInterval(updateETA, 1000);
+
+    function appendRecalageLine(text, isStatus) {
+        if (isStatus) recalageStatusEl.textContent = text;
+        const div = document.createElement('div');
+        div.textContent = text;
+        recalageFeedEl.appendChild(div);
+        recalageFeedEl.scrollTop = recalageFeedEl.scrollHeight;
+        // Cap to 200 lines
+        while (recalageFeedEl.childNodes.length > 200) recalageFeedEl.removeChild(recalageFeedEl.firstChild);
+    }
+
+    api.onCaptureLog((line) => {
+        // Detect phase markers
+        if (line.includes('=== PHASE 1') || /\[wrapper\] === PHASE 1/.test(line)) {
+            phaseEl.textContent = 'Phase 1 — Capture des tuiles';
+            recalageInfo.style.display = 'none';
+            inRecalage = false;
+        } else if (line.includes('=== PHASE 2') || /\[wrapper\] === PHASE 2/.test(line)) {
+            phaseEl.textContent = 'Phase 2 — Recalage et assemblage';
+            recalageInfo.style.display = '';
+            fillEl.style.width = '100%';
+            tileEl.textContent = captureTotalTiles + ' / ' + captureTotalTiles;
+            etaEl.textContent = 'Recalage…';
+            inRecalage = true;
+            appendRecalageLine('Initialisation du recalage…', true);
+        } else if (/\[(\d+)\/(\d+)\] Capturing tile/.test(line)) {
+            const m = line.match(/\[(\d+)\/(\d+)\] Capturing tile/);
+            if (m) {
+                const cur = parseInt(m[1], 10), total = parseInt(m[2], 10);
+                captureTotalTiles = total;
+                captureLastTile = cur;
+                tileEl.textContent = cur + ' / ' + total;
+                fillEl.style.width = Math.round(cur * 100 / total) + '%';
+            }
+        } else if (line.includes('Capture terminée')) {
+            tileEl.textContent = captureTotalTiles + ' / ' + captureTotalTiles;
+            fillEl.style.width = '100%';
+            etaEl.textContent = '—';
+        } else if (inRecalage) {
+            // Recalage live output — parse useful lines
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            // Recognised markers in 2_recalage.py
+            if (trimmed.startsWith('Detected grid:')) appendRecalageLine('Grille détectée — ' + trimmed.replace('Detected grid:', '').trim(), true);
+            else if (trimmed.startsWith('Tile size detected:')) appendRecalageLine('Taille des tuiles : ' + trimmed.replace('Tile size detected:', '').trim());
+            else if (/^Row \d+/i.test(trimmed)) appendRecalageLine(trimmed, true);
+            else if (/^Aligning row|^Aligning column|^Stitch|^Building|^Resizing|^Cropping|^Detecting|^Writing|^Light/.test(trimmed))
+                appendRecalageLine(trimmed, true);
+            else if (/^\s*\[?ncc=|score=|match/.test(trimmed)) appendRecalageLine(trimmed);
+            else if (trimmed.startsWith('[wrapper]')) {
+                // Wrapper milestones
+                if (trimmed.includes('final source:')) appendRecalageLine('Image finale localisée', true);
+                else if (trimmed.includes('final moved to:')) appendRecalageLine('Image finale prête', true);
+                else appendRecalageLine(trimmed);
+            }
+            else appendRecalageLine(trimmed);
+        }
+    });
+
+    const r = await api.captureRun({
+        name: pendingMeta.name,
+        visibleKm: pendingMeta.visibleKm,
+        areaWidthKm: pendingMeta.areaWidthKm,
+        areaHeightKm: pendingMeta.areaHeightKm,
+        screenW: pendingMeta.screenW,
+        screenH: pendingMeta.screenH
+    });
+    if (etaTimer) { clearInterval(etaTimer); etaTimer = null; }
+    captureResult = r;
+    if (r && r.ok) {
+        document.getElementById('result-title').textContent = 'Capture réussie';
+        document.getElementById('result-info').className = 'info-box';
+        document.getElementById('result-info').innerHTML =
+            '<strong>Carte assemblée :</strong><br>' +
+            '<small style="color:#9fb8a8;">' + (r.finalImage || '').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</small><br><br>' +
+            'Tout est prêt : nom, DCS, coordonnée et dimensions sont déjà renseignés. ' +
+            'Cliquez « Enregistrer » pour ajouter cette carte à votre bibliothèque.';
+    } else {
+        document.getElementById('result-title').textContent = 'Capture échouée';
+        document.getElementById('result-info').className = 'info-box error';
+        document.getElementById('result-info').textContent = 'Erreur : ' + (r && r.error || 'inconnue');
+        document.getElementById('btn-result-save').style.display = 'none';
+    }
+    setStep('result');
+}
+document.getElementById('btn-capture-cancel').addEventListener('click', async () => {
+    if (countdownTimer) {
+        // Cancel countdown — return to params
+        clearInterval(countdownTimer); countdownTimer = null;
+        setStep('params');
+        return;
+    }
+    if (!confirm('Forcer l\'arrêt de la capture ?')) return;
+    await api.captureCancel();
+});
+
+// =====================================================
+// Step 4 — Save + cleanup
+// =====================================================
+document.getElementById('btn-result-close').addEventListener('click', async () => {
+    // If we have intermediates and the user wants to leave without saving, offer cleanup
+    if (captureResult && captureResult.intermediatePaths && captureResult.intermediatePaths.length) {
+        if (confirm('Quitter sans enregistrer ?\nLes fichiers temporaires (' + fmtBytes(captureResult.intermediateBytes||0) + ') seront supprimés.')) {
+            try { await api.captureCleanupIntermediates(captureResult.intermediatePaths); } catch (e) {}
+        }
+    }
+    window.close();
+});
+
+document.getElementById('btn-result-save').addEventListener('click', async () => {
+    const err = document.getElementById('result-error');
+    err.style.display = 'none';
+    if (!captureResult || !captureResult.finalImage) return;
+    const heightKm = (pendingMeta.areaHeightKm === 'square') ? pendingMeta.areaWidthKm : pendingMeta.areaHeightNum;
+    const r = await api.captureSaveToLibrary({
+        finalImage: captureResult.finalImage,
+        name: pendingMeta.name,
+        dcsMap: pendingMeta.dcsMap,
+        cornerCoord: pendingMeta.cornerCoord,
+        widthKm: pendingMeta.areaWidthKm,
+        heightKm: heightKm
+    });
+    if (r && r.ok) {
+        // Show cleanup modal
+        const paths = (captureResult.intermediatePaths || []);
+        document.getElementById('cleanup-paths').innerHTML = paths.map(p =>
+            '<div>' + p.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>').join('');
+        document.getElementById('cleanup-size').textContent = fmtBytes(captureResult.intermediateBytes || 0);
+
+        // V18: warn if >250 tiles AND offer link to the recalage folder (which contains
+        // the unresized "brute" version that can be cropped manually)
+        const warningEl = document.getElementById('cleanup-bigcap-warning');
+        if (captureTotalTiles > 250) {
+            document.getElementById('cleanup-bigcap-count').textContent = captureTotalTiles;
+            // Pick the recalage folder (the 2nd path is *_recalage from the wrapper)
+            const recalageFolder = paths.find(p => /_recalage$/i.test(p)) || paths[paths.length - 1] || '';
+            const openLink = document.getElementById('cleanup-bigcap-openfolder');
+            if (recalageFolder) {
+                openLink.style.display = '';
+                openLink.onclick = (e) => {
+                    e.preventDefault();
+                    if (api.captureOpenFolder) api.captureOpenFolder(recalageFolder);
+                };
+                openLink.title = recalageFolder;
+            } else {
+                openLink.style.display = 'none';
+            }
+            warningEl.style.display = '';
+        } else {
+            warningEl.style.display = 'none';
+        }
+
+        document.getElementById('cleanup-modal').classList.add('visible');
+    } else {
+        err.textContent = 'Erreur : ' + (r && r.error || 'inconnue');
+        err.style.display = '';
+    }
+});
+
+document.getElementById('cleanup-keep').addEventListener('click', () => {
+    document.getElementById('cleanup-modal').classList.remove('visible');
+    alert('Carte enregistrée. Fichiers temporaires conservés.');
+    window.close();
+});
+
+document.getElementById('cleanup-delete').addEventListener('click', async () => {
+    document.getElementById('cleanup-modal').classList.remove('visible');
+    try {
+        const r = await api.captureCleanupIntermediates(captureResult.intermediatePaths);
+        alert('Carte enregistrée. ' + fmtBytes(r && r.freed || 0) + ' libérés.');
+    } catch (e) {
+        alert('Carte enregistrée mais nettoyage échoué : ' + e.message);
+    }
+    window.close();
+});
+
+// Init
+checkPython();
+</script>
+</body>
+</html>

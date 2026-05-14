@@ -28,9 +28,9 @@ Une seule fois. Ça télécharge ~250 MB de dépendances Electron dans `node_mod
 
 ### Étape 1 : bumper la version (optionnel mais recommandé)
 
-Édite `package.json`, change la ligne `"version": "17.0.0"` selon ce que tu veux.
+Édite `package.json`, change la ligne `"version": "18.0.0"` selon ce que tu veux.
 
-**Important** : pense à mettre la même version dans `installer/mcl-sit-installer.iss` à la ligne `#define AppVersion "17.0.0"`. Sinon le setup et l'app afficheront des versions différentes.
+**Important** : pense à mettre la même version dans `installer/mcl-sit-installer.iss` à la ligne `#define AppVersion "18.0.0"`. Sinon le setup et l'app afficheront des versions différentes.
 
 ### Étape 2 : générer l'Electron portable
 
@@ -53,11 +53,11 @@ Durée : 1 à 3 minutes (l'obfuscation prend ~30s sur sit-multi.js qui est gros)
 1. Ouvrir `installer\mcl-sit-installer.iss` avec **Inno Setup Compiler** (le double-clic le fait par défaut une fois Inno installé)
 2. Appuyer sur **F9** (ou menu Build → Compile)
 3. Attendre 1-2 minutes (compression LZMA2/ultra)
-4. Quand c'est fini, le fichier `MCL-SIT-Setup-17.0.0.exe` est dans `installer\output\`
+4. Quand c'est fini, le fichier `MCL-SIT-Setup-18.0.0.exe` est dans `installer\output\`
 
 ### Étape 4 : tester l'installeur
 
-1. Récupérer `installer\output\MCL-SIT-Setup-17.0.0.exe`
+1. Récupérer `installer\output\MCL-SIT-Setup-18.0.0.exe`
 2. Le copier sur **un PC vierge** (sans Node, sans rien — ou une VM Windows propre)
 3. Double-clic → suivre le wizard :
    - Choisir le dossier d'install
@@ -112,7 +112,7 @@ mcl-sit/
 └── installer/
     ├── mcl-sit-installer.iss                      ← script Inno
     └── output/
-        └── MCL-SIT-Setup-17.0.0.exe       ← LIVRABLE FINAL
+        └── MCL-SIT-Setup-18.0.0.exe       ← LIVRABLE FINAL
 ```
 
 C'est uniquement ce dernier `.exe` que tu distribues. Tout le reste reste sur ton PC dev.

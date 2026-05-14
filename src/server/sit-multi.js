@@ -67,6 +67,14 @@ let sharedPlans = [];
 // V15: PCDB reports — shared across all SIT clients, persisted server-side.
 // Schema per entry: { id, lat, lon, text, author, timestamp, editedAt? }
 let sharedPCDB = [];
+// V18: shared maps pool. Each entry is metadata + chunks indexed by id.
+// `sharedMapsMeta`  : array of { id, name, dcsMap, cornerCoord, widthKm, heightKm, imgWidth, imgHeight, author, timestamp, sizeBytes, thumbDataURL }
+// `sharedMapsData`  : map<id, Buffer | { mime, base64 }> — the full map image, kept in memory only
+let sharedMapsMeta = [];
+let sharedMapsData = {};
+// Upload state per client (assembling chunked uploads)
+// uploadsInProgress[ws][id] = { meta, mime, expectedChunks, receivedChunks, buffers[] }
+const uploadsInProgress = new WeakMap();
 let lastWorldstate = null;
 
 // ============================================================================
@@ -125,6 +133,8 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'planSync', plans: sharedPlans }));
             // V15: PCDB reports snapshot
             ws.send(JSON.stringify({ type: 'pcdbSync', reports: sharedPCDB }));
+            // V18: also send the list of shared maps available on the server
+            ws.send(JSON.stringify({ type: 'serverMapsList', maps: sharedMapsMeta }));
             
             // Commander reçoit la worldstate immédiatement
             if (client.role === 'commander' && lastWorldstate) {
@@ -240,6 +250,144 @@ wss.on('connection', (ws, req) => {
             if (!msg.id) return;
             sharedPCDB = sharedPCDB.filter(x => x.id !== msg.id);
             broadcastAll({ type: 'pcdbSync', reports: sharedPCDB });
+            return;
+        }
+
+        // ---- V18: SHARED MAPS POOL ----
+        // Workflow: client uploads in chunks (mapUploadStart → mapUploadChunk×N → mapUploadEnd),
+        // server stores in memory and broadcasts new metadata to all clients.
+        // Other clients can download via mapDownloadRequest → server sends chunks.
+        if (msg.type === 'mapUploadStart') {
+            const m = msg.meta;
+            if (!m || typeof m.id !== 'string' || !m.name || !m.dcsMap) return;
+            if (typeof m.sizeBytes !== 'number' || m.sizeBytes <= 0 || m.sizeBytes > 50 * 1024 * 1024) {
+                ws.send(JSON.stringify({ type: 'mapUploadResult', id: m.id, ok: false, error: 'Taille invalide (max 50 Mo)' }));
+                return;
+            }
+            const mime = (m.mime || 'image/png').toLowerCase();
+            if (!/^image\/(png|jpe?g|webp)$/.test(mime)) {
+                ws.send(JSON.stringify({ type: 'mapUploadResult', id: m.id, ok: false, error: 'Format non supporté' }));
+                return;
+            }
+            let up = uploadsInProgress.get(ws);
+            if (!up) { up = {}; uploadsInProgress.set(ws, up); }
+            up[m.id] = {
+                meta: m,
+                mime: mime,
+                expectedChunks: msg.totalChunks || 0,
+                receivedChunks: 0,
+                buffers: []
+            };
+            console.log('  [MAPS] Upload start from ' + (client.name || '?') + ' : ' + m.name + ' (' + Math.round(m.sizeBytes/1024) + ' Ko, ' + msg.totalChunks + ' chunks)');
+            return;
+        }
+        if (msg.type === 'mapUploadChunk') {
+            const up = uploadsInProgress.get(ws);
+            if (!up || !up[msg.id]) return;
+            const slot = up[msg.id];
+            try {
+                const buf = Buffer.from(msg.data, 'base64');
+                slot.buffers[msg.index] = buf;
+                slot.receivedChunks++;
+            } catch (e) { /* ignore */ }
+            return;
+        }
+        if (msg.type === 'mapUploadEnd') {
+            const up = uploadsInProgress.get(ws);
+            if (!up || !up[msg.id]) return;
+            const slot = up[msg.id];
+            // Reassemble
+            let full;
+            try { full = Buffer.concat(slot.buffers.filter(Boolean)); }
+            catch (e) {
+                ws.send(JSON.stringify({ type: 'mapUploadResult', id: msg.id, ok: false, error: 'Reconstruction échouée' }));
+                delete up[msg.id]; return;
+            }
+            if (full.length !== slot.meta.sizeBytes) {
+                ws.send(JSON.stringify({ type: 'mapUploadResult', id: msg.id, ok: false, error: 'Taille reçue invalide' }));
+                delete up[msg.id]; return;
+            }
+            // Validate magic bytes (basic check)
+            const isPNG = full[0] === 0x89 && full[1] === 0x50 && full[2] === 0x4E && full[3] === 0x47;
+            const isJPG = full[0] === 0xFF && full[1] === 0xD8 && full[2] === 0xFF;
+            const isWebP = full[0] === 0x52 && full[1] === 0x49 && full[2] === 0x46 && full[3] === 0x46;
+            if (!isPNG && !isJPG && !isWebP) {
+                ws.send(JSON.stringify({ type: 'mapUploadResult', id: msg.id, ok: false, error: 'Données image invalides' }));
+                delete up[msg.id]; return;
+            }
+            // Store
+            const id = slot.meta.id;
+            const meta = {
+                id: id,
+                name: String(slot.meta.name).substring(0, 200),
+                dcsMap: String(slot.meta.dcsMap).substring(0, 60),
+                cornerCoord: String(slot.meta.cornerCoord || '').substring(0, 80),
+                widthKm: Number(slot.meta.widthKm) || 0,
+                heightKm: Number(slot.meta.heightKm) || 0,
+                imgWidth: Number(slot.meta.imgWidth) || 0,
+                imgHeight: Number(slot.meta.imgHeight) || 0,
+                author: (client.name || '?').substring(0, 30),
+                timestamp: Date.now(),
+                sizeBytes: full.length,
+                mime: slot.mime,
+                thumbDataURL: slot.meta.thumbDataURL || null
+            };
+            // Replace any previous map with the same id
+            sharedMapsMeta = sharedMapsMeta.filter(x => x.id !== id);
+            sharedMapsMeta.push(meta);
+            sharedMapsData[id] = full;
+            delete up[msg.id];
+            console.log('  [MAPS] Upload OK : ' + meta.name + ' (' + Math.round(meta.sizeBytes/1024) + ' Ko) — total shared : ' + sharedMapsMeta.length);
+            // Tell uploader
+            ws.send(JSON.stringify({ type: 'mapUploadResult', id: id, ok: true }));
+            // Broadcast new list to all
+            broadcastAll({ type: 'serverMapsList', maps: sharedMapsMeta });
+            return;
+        }
+        if (msg.type === 'mapDelete') {
+            // A client can delete a map they uploaded (by id)
+            const id = msg.id;
+            if (!id) return;
+            const m = sharedMapsMeta.find(x => x.id === id);
+            if (!m) return;
+            // Only the original author can delete
+            if (m.author !== (client.name || '?')) {
+                ws.send(JSON.stringify({ type: 'mapDeleteResult', id: id, ok: false, error: 'Seul l\'auteur peut supprimer cette carte' }));
+                return;
+            }
+            sharedMapsMeta = sharedMapsMeta.filter(x => x.id !== id);
+            delete sharedMapsData[id];
+            ws.send(JSON.stringify({ type: 'mapDeleteResult', id: id, ok: true }));
+            broadcastAll({ type: 'serverMapsList', maps: sharedMapsMeta });
+            console.log('  [MAPS] Deleted : ' + id);
+            return;
+        }
+        if (msg.type === 'mapDownloadRequest') {
+            const id = msg.id;
+            if (!id) return;
+            const meta = sharedMapsMeta.find(x => x.id === id);
+            const data = sharedMapsData[id];
+            if (!meta || !data) {
+                ws.send(JSON.stringify({ type: 'mapDownloadError', id: id, error: 'Carte introuvable' }));
+                return;
+            }
+            // Send in chunks of 64 KB
+            const CHUNK = 64 * 1024;
+            const total = Math.ceil(data.length / CHUNK);
+            ws.send(JSON.stringify({ type: 'mapDownloadStart', id: id, meta: meta, totalChunks: total }));
+            for (let i = 0; i < total; i++) {
+                const start = i * CHUNK;
+                const end = Math.min(start + CHUNK, data.length);
+                const slice = data.slice(start, end);
+                ws.send(JSON.stringify({
+                    type: 'mapDownloadChunk',
+                    id: id,
+                    index: i,
+                    data: slice.toString('base64')
+                }));
+            }
+            ws.send(JSON.stringify({ type: 'mapDownloadEnd', id: id }));
+            console.log('  [MAPS] Downloaded ' + meta.name + ' to ' + (client.name || '?'));
             return;
         }
         

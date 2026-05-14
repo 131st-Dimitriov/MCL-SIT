@@ -20,6 +20,8 @@ const hookCheck = require('./hook-check');
 const autoUpdater = require('./auto-updater');
 const logger = require('./logger');
 const mapsLibrary = require('./maps-library');
+const pythonSetup = require('./python-setup');
+const captureRunner = require('./capture-runner');
 
 logger.init();
 
@@ -490,6 +492,323 @@ ipcMain.on('renderer:ready', (e) => {
     if (pendingMapLoad && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('maps:loadMap', pendingMapLoad);
         pendingMapLoad = null;
+    }
+});
+
+// ----------------------------------------------------------------------------
+// V18: Server maps relay — bridge between the SIT renderer (which owns the
+// WebSocket connection) and the maps library window.
+// ----------------------------------------------------------------------------
+let serverConnState = { connected: false, host: null, port: null, name: null };
+let serverMapsList = [];
+// In-flight transfers
+let pendingUploads = {};   // id -> { resolve, reject, name }
+let pendingDownloads = {}; // id -> { resolve, reject, meta, chunks, expectedChunks }
+
+function sendToMapsWindow(channel, payload) {
+    if (mapsWindow && !mapsWindow.isDestroyed()) {
+        mapsWindow.webContents.send(channel, payload);
+    }
+}
+
+function sendToSITRenderer(payload) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('maps:sendWS', payload);
+        return true;
+    }
+    return false;
+}
+
+// SIT renderer notifies us when its connection state changes
+ipcMain.on('maps:notifyServerConnectionState', (e, state) => {
+    serverConnState = state || { connected: false };
+    if (!serverConnState.connected) serverMapsList = [];
+    sendToMapsWindow('maps:serverConnectionState', serverConnState);
+    if (!serverConnState.connected) sendToMapsWindow('maps:serverMapsList', []);
+});
+
+// SIT renderer forwards incoming serverMapsList from the WebSocket
+ipcMain.on('maps:serverMapsListReceived', (e, list) => {
+    serverMapsList = Array.isArray(list) ? list : [];
+    sendToMapsWindow('maps:serverMapsList', serverMapsList);
+});
+
+// SIT renderer forwards mapUploadResult
+ipcMain.on('maps:mapUploadResultReceived', (e, msg) => {
+    const id = msg && msg.id;
+    if (!id) return;
+    const slot = pendingUploads[id];
+    if (!slot) return;
+    delete pendingUploads[id];
+    if (msg.ok) slot.resolve({ ok: true });
+    else slot.resolve({ ok: false, error: msg.error || 'erreur serveur' });
+});
+
+// SIT renderer forwards mapDeleteResult
+ipcMain.on('maps:mapDeleteResultReceived', (e, msg) => {
+    const id = msg && msg.id;
+    if (!id) return;
+    const slot = pendingUploads[id]; // we reuse pendingUploads for delete waits
+    if (!slot) return;
+    delete pendingUploads[id];
+    if (msg.ok) slot.resolve({ ok: true });
+    else slot.resolve({ ok: false, error: msg.error || 'erreur serveur' });
+});
+
+// SIT renderer forwards mapDownload* events
+ipcMain.on('maps:mapDownloadMsgReceived', (e, msg) => {
+    const id = msg && msg.id;
+    if (!id) return;
+    const slot = pendingDownloads[id];
+    if (!slot) return;
+    if (msg.type === 'mapDownloadStart') {
+        slot.meta = msg.meta;
+        slot.expectedChunks = msg.totalChunks;
+        slot.chunks = new Array(msg.totalChunks);
+        slot.receivedChunks = 0;
+    } else if (msg.type === 'mapDownloadChunk') {
+        try {
+            slot.chunks[msg.index] = Buffer.from(msg.data, 'base64');
+            slot.receivedChunks++;
+            if (slot.expectedChunks > 0) {
+                const pct = Math.round(slot.receivedChunks * 100 / slot.expectedChunks);
+                sendToMapsWindow('maps:downloadProgress', { id: id, pct: pct });
+            }
+        } catch (err) {}
+    } else if (msg.type === 'mapDownloadEnd') {
+        delete pendingDownloads[id];
+        try {
+            const full = Buffer.concat(slot.chunks.filter(Boolean));
+            // Save into the local library
+            const meta = slot.meta;
+            const tmpFile = path.join(app.getPath('temp'), 'mclsit-dl-' + id + '.bin');
+            fs.writeFileSync(tmpFile, full);
+            // Generate a thumbnail data URL: use the meta.thumbDataURL if provided by uploader
+            const entry = mapsLibrary.addMap(tmpFile, {
+                name: meta.name,
+                dcsMap: meta.dcsMap,
+                cornerCoord: meta.cornerCoord,
+                widthKm: meta.widthKm,
+                heightKm: meta.heightKm,
+                imgWidth: meta.imgWidth,
+                imgHeight: meta.imgHeight,
+                thumbnailDataURL: meta.thumbDataURL
+            });
+            try { fs.unlinkSync(tmpFile); } catch (err) {}
+            slot.resolve({ ok: true, entry });
+        } catch (err) {
+            slot.resolve({ ok: false, error: err.message });
+        }
+    } else if (msg.type === 'mapDownloadError') {
+        delete pendingDownloads[id];
+        slot.resolve({ ok: false, error: msg.error || 'erreur serveur' });
+    }
+});
+
+// Maps library asks for current state
+ipcMain.handle('maps:getServerConnectionState', () => serverConnState);
+ipcMain.handle('maps:getServerMapsList', () => serverMapsList);
+
+// Maps library asks to publish a local map
+ipcMain.handle('maps:publishToServer', async (e, id) => {
+    if (!serverConnState.connected) return { ok: false, error: 'Pas connecté au serveur SIT' };
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'SIT non lancé' };
+    // Load the local map
+    const local = mapsLibrary.listMaps().maps.find(x => x.id === id);
+    if (!local) return { ok: false, error: 'Carte locale introuvable' };
+    let buf;
+    try { buf = fs.readFileSync(local.imagePath); }
+    catch (err) { return { ok: false, error: 'Lecture image échouée : ' + err.message }; }
+
+    const ext = path.extname(local.imagePath).slice(1).toLowerCase();
+    const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg'
+               : (ext === 'webp') ? 'image/webp'
+               : 'image/png';
+    const thumbDataURL = mapsLibrary.getThumbnail(id);
+
+    const CHUNK = 64 * 1024;
+    const totalChunks = Math.ceil(buf.length / CHUNK);
+
+    return new Promise((resolve) => {
+        pendingUploads[id] = { resolve, name: local.name };
+        const okStart = sendToSITRenderer({
+            type: 'mapUploadStart',
+            meta: {
+                id: id,
+                name: local.name,
+                dcsMap: local.dcsMap,
+                cornerCoord: local.cornerCoord || '',
+                widthKm: local.widthKm,
+                heightKm: local.heightKm,
+                imgWidth: local.imgWidth,
+                imgHeight: local.imgHeight,
+                sizeBytes: buf.length,
+                mime: mime,
+                thumbDataURL: thumbDataURL
+            },
+            totalChunks: totalChunks
+        });
+        if (!okStart) {
+            delete pendingUploads[id];
+            resolve({ ok: false, error: 'SIT non joignable' });
+            return;
+        }
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK;
+            const end = Math.min(start + CHUNK, buf.length);
+            const slice = buf.slice(start, end);
+            sendToSITRenderer({
+                type: 'mapUploadChunk',
+                id: id,
+                index: i,
+                data: slice.toString('base64')
+            });
+            const pct = Math.round((i + 1) * 100 / totalChunks);
+            sendToMapsWindow('maps:uploadProgress', { id: id, pct: pct });
+        }
+        sendToSITRenderer({ type: 'mapUploadEnd', id: id });
+        // Timeout if no response in 30s
+        setTimeout(() => {
+            if (pendingUploads[id]) {
+                delete pendingUploads[id];
+                resolve({ ok: false, error: 'Pas de réponse du serveur (timeout)' });
+            }
+        }, 30000);
+    });
+});
+
+// Maps library asks to download a server map
+ipcMain.handle('maps:downloadFromServer', async (e, id) => {
+    if (!serverConnState.connected) return { ok: false, error: 'Pas connecté' };
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'SIT non lancé' };
+    return new Promise((resolve) => {
+        pendingDownloads[id] = { resolve, chunks: [], expectedChunks: 0, receivedChunks: 0 };
+        sendToSITRenderer({ type: 'mapDownloadRequest', id: id });
+        setTimeout(() => {
+            if (pendingDownloads[id]) {
+                delete pendingDownloads[id];
+                resolve({ ok: false, error: 'Timeout' });
+            }
+        }, 60000);
+    });
+});
+
+// Maps library asks to delete a server map (owner only)
+ipcMain.handle('maps:deleteFromServer', async (e, id) => {
+    if (!serverConnState.connected) return { ok: false, error: 'Pas connecté' };
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'SIT non lancé' };
+    return new Promise((resolve) => {
+        pendingUploads[id] = { resolve };
+        sendToSITRenderer({ type: 'mapDelete', id: id });
+        setTimeout(() => {
+            if (pendingUploads[id]) {
+                delete pendingUploads[id];
+                resolve({ ok: false, error: 'Timeout' });
+            }
+        }, 10000);
+    });
+});
+
+// ----------------------------------------------------------------------------
+// V18 : Capture window + Python setup
+// ----------------------------------------------------------------------------
+let captureWindow = null;
+
+function createCaptureWindow() {
+    if (captureWindow && !captureWindow.isDestroyed()) {
+        captureWindow.focus();
+        return;
+    }
+    captureWindow = new BrowserWindow({
+        width: 880, height: 760,
+        minWidth: 720, minHeight: 600,
+        autoHideMenuBar: true,
+        backgroundColor: '#0a1012',
+        title: 'MCL-SIT — Capture de carte',
+        icon: resolveIconPath() || undefined,
+        show: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true, sandbox: true, nodeIntegration: false,
+            devTools: !app.isPackaged
+        }
+    });
+    captureWindow.setMenu(null);
+    captureWindow.loadFile(path.join(__dirname, 'capture-window.html'));
+    captureWindow.once('ready-to-show', () => captureWindow.show());
+    captureWindow.on('closed', () => { captureWindow = null; });
+}
+
+ipcMain.on('app:openCaptureWindow', () => createCaptureWindow());
+
+ipcMain.handle('capture:checkPython', () => ({ ok: pythonSetup.isInstalled() }));
+
+ipcMain.handle('capture:setupPython', async (e) => {
+    return await pythonSetup.setup((info) => {
+        if (captureWindow && !captureWindow.isDestroyed()) {
+            captureWindow.webContents.send('capture:setupProgress', info);
+        }
+    });
+});
+
+ipcMain.handle('capture:run', async (e, params) => {
+    return await captureRunner.runCapture(params, (line) => {
+        if (captureWindow && !captureWindow.isDestroyed()) {
+            captureWindow.webContents.send('capture:log', line);
+        }
+    });
+});
+
+ipcMain.handle('capture:cancel', () => {
+    captureRunner.cancelCapture();
+    return { ok: true };
+});
+
+ipcMain.handle('capture:saveToLibrary', async (e, opts) => {
+    try {
+        if (!opts.finalImage || !fs.existsSync(opts.finalImage)) {
+            return { ok: false, error: 'Image finale introuvable' };
+        }
+        // Read image dims via a small probe — Electron's nativeImage can decode
+        const { nativeImage } = require('electron');
+        const img = nativeImage.createFromPath(opts.finalImage);
+        const sz = img.getSize();
+        // Make a 256x256 thumbnail with cover fit
+        const thumbSz = 256;
+        const scale = Math.max(thumbSz / sz.width, thumbSz / sz.height);
+        const tw = Math.round(sz.width * scale);
+        const th = Math.round(sz.height * scale);
+        const resized = img.resize({ width: tw, height: th });
+        const thumbDataURL = resized.toDataURL();
+        const entry = mapsLibrary.addMap(opts.finalImage, {
+            name: opts.name,
+            dcsMap: opts.dcsMap,
+            cornerCoord: opts.cornerCoord,
+            widthKm: opts.widthKm,
+            heightKm: opts.heightKm,
+            imgWidth: sz.width,
+            imgHeight: sz.height,
+            thumbnailDataURL: thumbDataURL
+        });
+        // Also remove the final source file (we have a copy in the library)
+        try { fs.unlinkSync(opts.finalImage); } catch (e) {}
+        // V18.1 — notify the maps library window (if open) to refresh
+        if (mapsWindow && !mapsWindow.isDestroyed()) {
+            mapsWindow.webContents.send('maps:localLibraryChanged');
+        }
+        return { ok: true, entry };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+
+ipcMain.handle('capture:cleanupIntermediates', (e, paths) => {
+    return captureRunner.cleanupIntermediates(paths);
+});
+
+ipcMain.on('capture:openFolder', (e, folder) => {
+    if (folder && fs.existsSync(folder)) {
+        shell.openPath(folder);
     }
 });
 

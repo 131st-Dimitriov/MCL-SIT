@@ -195,6 +195,57 @@
         padding: 7px 10px;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* V18: tabs */
+    .tabs {
+        display: flex; align-items: center; gap: 2px;
+        margin: 12px 0 0 0;
+        border-bottom: 1px solid rgba(95,168,194,0.25);
+    }
+    .tab {
+        background: transparent;
+        border: 1px solid transparent;
+        border-bottom: none;
+        color: #7e9690;
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 8px 18px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        cursor: pointer;
+        position: relative;
+        bottom: -1px;
+    }
+    .tab:hover { color: #c8d1c8; }
+    .tab.active {
+        color: #e8efe8;
+        background: linear-gradient(180deg, #1a2a30, #0e1a1f);
+        border-color: rgba(95,168,194,0.55);
+        border-bottom-color: #0a1012;
+    }
+    .tab.disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+    .tab-server-info {
+        margin-left: auto;
+        font-size: 10px;
+        color: #7e9690;
+        letter-spacing: 1px;
+        padding-right: 8px;
+    }
+    .tab-server-info.ok { color: #7ee36c; }
+    .tab-server-info.warn { color: #ef9f27; }
+    /* V18: upload/download progress badge */
+    .progress-badge {
+        background: rgba(85,185,214,0.15);
+        color: #5fa8c2;
+        font-size: 9px;
+        font-weight: 800;
+        padding: 2px 6px;
+        margin-left: 8px;
+        border: 1px solid rgba(85,185,214,0.45);
+        letter-spacing: 1px;
+    }
+    .progress-badge.success { color: #7ee36c; border-color: rgba(126,227,108,0.55); background: rgba(126,227,108,0.1); }
+    .progress-badge.error { color: #ef554f; border-color: rgba(239,85,79,0.55); background: rgba(239,85,79,0.1); }
 </style>
 </head>
 <body>
@@ -208,11 +259,18 @@
         <div class="hex"></div>
         <div>
             <div class="title">BIBLIOTHÈQUE DE CARTES</div>
-            <div class="subtitle">MCL-SIT — V17</div>
+            <div class="subtitle">MCL-SIT — V18</div>
         </div>
         <div class="spacer"></div>
         <div class="meta-chip" id="total-size">— Mo</div>
         <div class="meta-chip" id="total-count">0 cartes</div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="local">Cartes locales</button>
+        <button class="tab" data-tab="server" id="tab-server">Cartes serveur</button>
+        <div class="tab-server-info" id="tab-server-info"></div>
     </div>
 
     <div class="toolbar">
@@ -221,6 +279,7 @@
             <option value="">Toutes les cartes DCS</option>
         </select>
         <div class="spacer"></div>
+        <button class="btn" id="btn-capture" title="Faire une nouvelle capture depuis DCS">📷 Capturer depuis DCS</button>
         <button class="btn primary" id="btn-add">+ Ajouter une carte</button>
     </div>
 
@@ -285,6 +344,13 @@ const DCS_MAPS = ['Caucase', 'Nevada (NTTR)', 'Normandie', 'Persian Gulf', 'Syri
 let allMaps = [];
 let editingId = null;
 let pickedFilePath = null;
+// V18 — server maps state
+let currentTab = 'local';          // 'local' or 'server'
+let serverConnected = false;       // are we able to talk to a SIT server right now?
+let serverInfo = null;             // { host, port, name }
+let serverMaps = [];               // list of metadata for maps published on the SIT server
+let downloadProgress = {};         // id -> { pct, status: 'downloading'|'done'|'error' }
+let uploadProgress = {};           // id -> { pct, status }
 
 function fmtBytes(b) {
     if (b < 1024) return b + ' o';
@@ -317,6 +383,34 @@ async function refresh() {
 }
 
 function render() {
+    if (currentTab === 'server') renderServer();
+    else renderLocal();
+    updateTabsUI();
+}
+
+function updateTabsUI() {
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === currentTab);
+    });
+    const tabServer = document.getElementById('tab-server');
+    const info = document.getElementById('tab-server-info');
+    if (serverConnected) {
+        tabServer.classList.remove('disabled');
+        info.classList.remove('warn');
+        info.classList.add('ok');
+        info.textContent = 'Serveur connecté' + (serverInfo && serverInfo.host ? ' · ' + serverInfo.host : '');
+    } else {
+        tabServer.classList.add('disabled');
+        info.classList.remove('ok');
+        info.classList.add('warn');
+        info.textContent = 'Hors-ligne — connectez-vous à un serveur SIT pour partager';
+        if (currentTab === 'server') { currentTab = 'local'; render(); return; }
+    }
+    // Hide the "+ Ajouter" button on server tab
+    document.getElementById('btn-add').style.display = (currentTab === 'server') ? 'none' : '';
+}
+
+function renderLocal() {
     const list = document.getElementById('map-list');
     const search = document.getElementById('search').value.trim().toLowerCase();
     const filter = document.getElementById('filter-dcs').value;
@@ -326,6 +420,7 @@ function render() {
         return true;
     }).sort((a, b) => (b.dateAdded || '').localeCompare(a.dateAdded || ''));
 
+    document.getElementById('total-count').textContent = allMaps.length + ' carte' + (allMaps.length > 1 ? 's' : '') + ' locales';
     if (filtered.length === 0) {
         list.innerHTML = '<div class="empty">' +
             (allMaps.length === 0
@@ -337,11 +432,18 @@ function render() {
 
     list.innerHTML = filtered.map(m => {
         const date = m.dateAdded ? new Date(m.dateAdded).toLocaleDateString('fr-FR') : '—';
-        const thumbStyle = m.thumbPath ? '' : '';  // We'll set bg via JS after with the data URL
+        const upProg = uploadProgress[m.id];
+        let badge = '';
+        if (upProg) {
+            if (upProg.status === 'uploading') badge = `<span class="progress-badge">↑ ${upProg.pct}%</span>`;
+            else if (upProg.status === 'done') badge = `<span class="progress-badge success">PUBLIÉE ✓</span>`;
+            else if (upProg.status === 'error') badge = `<span class="progress-badge error">ÉCHEC</span>`;
+        }
+        const canPublish = serverConnected && !upProg;
         return `<div class="map-card" data-id="${m.id}">
             <div class="thumb" data-thumb="${m.id}">${m.thumbPath ? '' : 'PAS DE<br>VIGNETTE'}</div>
             <div class="info">
-                <div class="name">${escapeHTML(m.name)}</div>
+                <div class="name">${escapeHTML(m.name)} ${badge}</div>
                 <div class="row">
                     <div><span class="lbl">DCS:</span> <span class="val">${escapeHTML(m.dcsMap)}</span></div>
                     <div><span class="lbl">DIM:</span> <span class="val">${m.widthKm} × ${m.heightKm} km</span></div>
@@ -351,26 +453,23 @@ function render() {
             </div>
             <div class="actions">
                 <button class="action-load" data-id="${m.id}">Charger</button>
+                <button class="action-publish" data-id="${m.id}" ${canPublish ? '' : 'disabled'}>Publier</button>
                 <button class="action-edit" data-id="${m.id}">Éditer</button>
                 <button class="action-del danger" data-id="${m.id}">Supprimer</button>
             </div>
         </div>`;
     }).join('');
 
-    // Load thumbnails asynchronously
+    // Load thumbnails
     for (const m of filtered) {
         if (!m.thumbPath) continue;
         const el = list.querySelector('[data-thumb="' + m.id + '"]');
         if (!el) continue;
         api.mapsGetThumbnail(m.id).then(dataUrl => {
-            if (dataUrl && el) {
-                el.style.backgroundImage = 'url(' + dataUrl + ')';
-                el.textContent = '';
-            }
+            if (dataUrl && el) { el.style.backgroundImage = 'url(' + dataUrl + ')'; el.textContent = ''; }
         });
     }
 
-    // Card click = load (the entire card except actions buttons)
     list.querySelectorAll('.map-card').forEach(card => {
         card.addEventListener('click', (e) => {
             if (e.target.closest('.actions')) return;
@@ -380,12 +479,137 @@ function render() {
     list.querySelectorAll('.action-load').forEach(b => b.addEventListener('click', (e) => {
         e.stopPropagation(); loadMap(b.dataset.id);
     }));
+    list.querySelectorAll('.action-publish').forEach(b => b.addEventListener('click', (e) => {
+        e.stopPropagation(); publishMap(b.dataset.id);
+    }));
     list.querySelectorAll('.action-edit').forEach(b => b.addEventListener('click', (e) => {
         e.stopPropagation(); openModalEdit(b.dataset.id);
     }));
     list.querySelectorAll('.action-del').forEach(b => b.addEventListener('click', (e) => {
         e.stopPropagation(); confirmDelete(b.dataset.id);
     }));
+}
+
+function renderServer() {
+    const list = document.getElementById('map-list');
+    const search = document.getElementById('search').value.trim().toLowerCase();
+    const filter = document.getElementById('filter-dcs').value;
+    const filtered = serverMaps.filter(m => {
+        if (filter && m.dcsMap !== filter) return false;
+        if (search && !m.name.toLowerCase().includes(search) && !m.dcsMap.toLowerCase().includes(search)
+            && !(m.author||'').toLowerCase().includes(search)) return false;
+        return true;
+    }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    document.getElementById('total-count').textContent = serverMaps.length + ' carte' + (serverMaps.length > 1 ? 's' : '') + ' sur serveur';
+    let totalBytes = 0;
+    for (const m of serverMaps) totalBytes += (m.sizeBytes || 0);
+    document.getElementById('total-size').textContent = fmtBytes(totalBytes);
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty">' +
+            (serverMaps.length === 0
+                ? 'Aucune carte publiée sur le serveur. Allez dans « Cartes locales » et cliquez « Publier » sur une carte.'
+                : 'Aucune carte ne correspond à la recherche.')
+            + '</div>';
+        return;
+    }
+
+    const myName = (serverInfo && serverInfo.name) || '';
+    list.innerHTML = filtered.map(m => {
+        const date = m.timestamp ? new Date(m.timestamp).toLocaleDateString('fr-FR') : '—';
+        const isMine = (m.author === myName);
+        const isLocal = allMaps.some(x => x.id === m.id);
+        const dlProg = downloadProgress[m.id];
+        let badge = '';
+        if (dlProg) {
+            if (dlProg.status === 'downloading') badge = `<span class="progress-badge">↓ ${dlProg.pct}%</span>`;
+            else if (dlProg.status === 'done') badge = `<span class="progress-badge success">TÉLÉCHARGÉE ✓</span>`;
+            else if (dlProg.status === 'error') badge = `<span class="progress-badge error">ÉCHEC</span>`;
+        } else if (isLocal) badge = `<span class="progress-badge success">DÉJÀ EN LOCAL</span>`;
+        const canDownload = !dlProg && !isLocal;
+        return `<div class="map-card" data-id="${m.id}">
+            <div class="thumb" data-server-thumb="${m.id}">${m.thumbDataURL ? '' : 'PAS DE<br>VIGNETTE'}</div>
+            <div class="info">
+                <div class="name">${escapeHTML(m.name)} ${badge}</div>
+                <div class="row">
+                    <div><span class="lbl">DCS:</span> <span class="val">${escapeHTML(m.dcsMap)}</span></div>
+                    <div><span class="lbl">DIM:</span> <span class="val">${m.widthKm} × ${m.heightKm} km</span></div>
+                    <div><span class="lbl">TAILLE:</span> <span class="val">${fmtBytes(m.sizeBytes||0)}</span></div>
+                </div>
+                <div class="row">
+                    <div><span class="lbl">PAR:</span> <span class="val">${escapeHTML(m.author||'?')}</span></div>
+                    <div><span class="lbl">LE:</span> <span class="val">${date}</span></div>
+                </div>
+                ${m.cornerCoord ? '<div class="row"><div><span class="lbl">REF:</span> <span class="val">' + escapeHTML(m.cornerCoord) + '</span></div></div>' : ''}
+            </div>
+            <div class="actions">
+                <button class="action-download" data-id="${m.id}" ${canDownload ? '' : 'disabled'}>${isLocal ? 'Déjà OK' : 'Télécharger'}</button>
+                ${isMine ? `<button class="action-server-del danger" data-id="${m.id}">Supprimer</button>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    // Set thumbnail bg from data URL (already in metadata, no fetch needed)
+    for (const m of filtered) {
+        if (!m.thumbDataURL) continue;
+        const el = list.querySelector('[data-server-thumb="' + m.id + '"]');
+        if (!el) continue;
+        el.style.backgroundImage = 'url(' + m.thumbDataURL + ')';
+        el.textContent = '';
+    }
+
+    list.querySelectorAll('.action-download').forEach(b => b.addEventListener('click', (e) => {
+        e.stopPropagation(); downloadServerMap(b.dataset.id);
+    }));
+    list.querySelectorAll('.action-server-del').forEach(b => b.addEventListener('click', (e) => {
+        e.stopPropagation(); deleteServerMap(b.dataset.id);
+    }));
+}
+
+async function publishMap(id) {
+    const m = allMaps.find(x => x.id === id);
+    if (!m) return;
+    if (!confirm('Publier « ' + m.name + ' » sur le serveur SIT ?\nElle sera visible et téléchargeable par tous les joueurs connectés.')) return;
+    uploadProgress[id] = { pct: 0, status: 'uploading' };
+    render();
+    try {
+        const r = await api.mapsPublishToServer(id);
+        if (r && r.ok) uploadProgress[id] = { pct: 100, status: 'done' };
+        else uploadProgress[id] = { pct: 0, status: 'error', error: r && r.error };
+    } catch (e) {
+        uploadProgress[id] = { pct: 0, status: 'error', error: e.message };
+    }
+    render();
+    setTimeout(() => { delete uploadProgress[id]; render(); }, 3500);
+}
+
+async function downloadServerMap(id) {
+    const m = serverMaps.find(x => x.id === id);
+    if (!m) return;
+    downloadProgress[id] = { pct: 0, status: 'downloading' };
+    render();
+    try {
+        const r = await api.mapsDownloadFromServer(id);
+        if (r && r.ok) {
+            downloadProgress[id] = { pct: 100, status: 'done' };
+            await refresh();
+        } else {
+            downloadProgress[id] = { pct: 0, status: 'error', error: r && r.error };
+        }
+    } catch (e) {
+        downloadProgress[id] = { pct: 0, status: 'error', error: e.message };
+    }
+    render();
+    setTimeout(() => { delete downloadProgress[id]; render(); }, 3500);
+}
+
+async function deleteServerMap(id) {
+    const m = serverMaps.find(x => x.id === id);
+    if (!m) return;
+    if (!confirm('Supprimer « ' + m.name + ' » du serveur ?\nElle restera dans votre bibliothèque locale.')) return;
+    const r = await api.mapsDeleteFromServer(id);
+    if (!r || !r.ok) alert('Erreur : ' + (r && r.error || 'inconnu'));
 }
 
 async function loadMap(id) {
@@ -443,6 +667,9 @@ function closeModal() {
 }
 
 document.getElementById('btn-add').addEventListener('click', openModalAdd);
+document.getElementById('btn-capture').addEventListener('click', () => {
+    if (api.openCaptureWindow) api.openCaptureWindow();
+});
 document.getElementById('m-cancel').addEventListener('click', closeModal);
 
 document.getElementById('m-pick').addEventListener('click', async () => {
@@ -528,6 +755,70 @@ function makeThumbnail(dataURL, size) {
 
 document.getElementById('search').addEventListener('input', render);
 document.getElementById('filter-dcs').addEventListener('change', render);
+// V18: tab switching
+document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+        if (t.classList.contains('disabled')) return;
+        currentTab = t.dataset.tab;
+        render();
+    });
+});
+// V18: receive server connection state and shared maps list from main
+if (api.onServerConnectionState) {
+    api.onServerConnectionState((state) => {
+        serverConnected = !!(state && state.connected);
+        serverInfo = state || null;
+        updateTabsUI();
+        if (currentTab === 'server') render();
+    });
+}
+if (api.onServerMapsList) {
+    api.onServerMapsList((maps) => {
+        serverMaps = Array.isArray(maps) ? maps : [];
+        if (currentTab === 'server') render();
+        else updateTabsUI(); // refresh badges on local
+    });
+}
+if (api.onMapDownloadProgress) {
+    api.onMapDownloadProgress((info) => {
+        if (info && info.id) {
+            downloadProgress[info.id] = { pct: info.pct, status: 'downloading' };
+            if (currentTab === 'server') render();
+        }
+    });
+}
+if (api.onMapUploadProgress) {
+    api.onMapUploadProgress((info) => {
+        if (info && info.id) {
+            uploadProgress[info.id] = { pct: info.pct, status: 'uploading' };
+            if (currentTab === 'local') render();
+        }
+    });
+}
+if (api.onLocalLibraryChanged) {
+    api.onLocalLibraryChanged(() => {
+        // External event (e.g., capture saved): refresh the local list
+        refresh();
+    });
+}
+
+// Pull initial server state
+if (api.getServerConnectionState) {
+    api.getServerConnectionState().then(state => {
+        if (state) {
+            serverConnected = !!state.connected;
+            serverInfo = state;
+        }
+        if (api.getServerMapsList) {
+            api.getServerMapsList().then(maps => {
+                serverMaps = Array.isArray(maps) ? maps : [];
+                updateTabsUI();
+            });
+        } else {
+            updateTabsUI();
+        }
+    });
+}
 
 populateDcsSelects();
 refresh();
