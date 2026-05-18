@@ -672,13 +672,14 @@ wss.on('connection', (ws, req) => {
         
         // ---- SPAWN 105 (XL package) ----
         if (msg.type === 'spawn105') {
-            console.log('  [SPAWN105] ' + client.name + ': at ' + msg.lat + ',' + msg.lon);
+            console.log('  [SPAWN105] ' + client.name + ': at ' + msg.lat + ',' + msg.lon + ' nation=' + (msg.nation || 'french'));
             try {
                 const spawn105Path = path.join(dcsBasePath, 'Logs', 'sit_spawn105.json');
                 const orderLine = JSON.stringify({
                     lat: msg.lat,
                     lon: msg.lon,
                     coalition: msg.coalition || 2,
+                    nation: msg.nation || 'french',
                     author: client.name,
                     timestamp: Date.now()
                 }) + '\n';
@@ -691,13 +692,14 @@ wss.on('connection', (ws, req) => {
         
         // ---- SPAWN CSAR (MERCURE + CHROME only) ----
         if (msg.type === 'spawnCSAR') {
-            console.log('  [SPAWNCSAR] ' + client.name + ': at ' + msg.lat + ',' + msg.lon);
+            console.log('  [SPAWNCSAR] ' + client.name + ': at ' + msg.lat + ',' + msg.lon + ' nation=' + (msg.nation || 'french'));
             try {
                 const csarPath = path.join(dcsBasePath, 'Logs', 'sit_spawn_csar.json');
                 const orderLine = JSON.stringify({
                     lat: msg.lat,
                     lon: msg.lon,
                     coalition: msg.coalition || 2,
+                    nation: msg.nation || 'french',
                     author: client.name,
                     timestamp: Date.now()
                 }) + '\n';

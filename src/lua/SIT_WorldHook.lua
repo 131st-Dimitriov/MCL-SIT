@@ -2075,6 +2075,7 @@ function SIT_Callbacks.onSimulationFrame()
             local lat = tonumber(line:match('"lat":([%-]?[%d%.]+)'))
             local lon = tonumber(line:match('"lon":([%-]?[%d%.]+)'))
             local coa = tonumber(line:match('"coalition":(%d+)')) or 2
+            local nation = line:match('"nation":"([^"]*)"') or "french"
             local author = line:match('"author":"([^"]*)"') or "SIT"
             
             if lat and lon then
@@ -2085,6 +2086,45 @@ function SIT_Callbacks.onSimulationFrame()
                 -- Country id: 80=France/Blue, 81=Russia... but in 105.lua it's 80=blue, 81=red
                 local countryId = (coa == 1) and 81 or 80
                 
+                -- V19: nation-based unit types for the 105 package.
+                --   french_xl  = FrenchPack XL (3 Leclerc_XXI)
+                --   french_rcr = FrenchPack 10RCR (2 SEPAR + 1 VBCI)
+                --   french     = legacy alias for french_xl (kept for compatibility)
+                --   german     = base DCS units
+                --   russian    = base DCS units (incl. now-official CHAP_ units)
+                -- 105/106/107 may differ (10RCR has different units for each slot).
+                local t105, t106, t107, tAtlas, tCubi, tPamela
+                if nation == "german" then
+                    t105    = "leopard-2"
+                    t106    = "leopard-2"
+                    t107    = "leopard-2"
+                    tAtlas  = "TPZ"
+                    tCubi   = "M 818"
+                    tPamela = "Roland ADS"
+                elseif nation == "russian" then
+                    t105    = "CHAP_T90M"
+                    t106    = "CHAP_T90M"
+                    t107    = "CHAP_T90M"
+                    tAtlas  = "BRDM-2"
+                    tCubi   = "Ural-4320T"
+                    tPamela = "2S6 Tunguska"
+                elseif nation == "french_rcr" then
+                    t105    = "SEPAR"
+                    t106    = "SEPAR"
+                    t107    = "VBCI"
+                    tAtlas  = "VBL50"
+                    tCubi   = "TRM2000"
+                    tPamela = "TRMMISTRAL"
+                else
+                    -- french_xl (default) or legacy "french"
+                    t105    = "Leclerc_XXI"
+                    t106    = "Leclerc_XXI"
+                    t107    = "Leclerc_XXI"
+                    tAtlas  = "VBL50"
+                    tCubi   = "TRM2000"
+                    tPamela = "TRMMISTRAL"
+                end
+                
                 local spawnCode = string.format([==[
                     pcall(function()
                         local slot = %d
@@ -2092,7 +2132,12 @@ function SIT_Callbacks.onSimulationFrame()
                         local baseX = p.x
                         local baseZ = p.z
                         local countryId = %d
-                        local tankType = "Leclerc_XXI"
+                        local type105 = "%s"
+                        local type106 = "%s"
+                        local type107 = "%s"
+                        local atlasType = "%s"
+                        local cubiType = "%s"
+                        local pamelaType = "%s"
                         
                         local g105_name   = "GP_105_" .. slot
                         local g106_name   = "GP_106_" .. slot
@@ -2110,11 +2155,11 @@ function SIT_Callbacks.onSimulationFrame()
                         local uCubi_name  = "Cubi_" .. slot
                         local uPam_name   = "Pamela_" .. slot
                         
-                        -- 105 : Leclerc principal
+                        -- 105 : véhicule principal
                         local grp105 = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = tankType,
+                                type = type105,
                                 transportable = { randomTransportable = false },
                                 livery_id = "131st - DV",
                                 skill = "Excellent",
@@ -2128,7 +2173,7 @@ function SIT_Callbacks.onSimulationFrame()
                         local grp106 = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = tankType,
+                                type = type106,
                                 transportable = { randomTransportable = false },
                                 livery_id = "131st - DV",
                                 skill = "Excellent",
@@ -2142,7 +2187,7 @@ function SIT_Callbacks.onSimulationFrame()
                         local grp107 = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = tankType,
+                                type = type107,
                                 transportable = { randomTransportable = false },
                                 livery_id = "131st - DV",
                                 skill = "Excellent",
@@ -2152,11 +2197,11 @@ function SIT_Callbacks.onSimulationFrame()
                             y = baseZ, x = baseX - 60, name = g107_name,
                             start_time = 0, task = "Ground Nothing",
                         }
-                        -- Atlas : VBL 200m est (DCS z=East) — preview shows it to the right
+                        -- Atlas : 200m est (DCS z=East) — preview shows it to the right
                         local grpAtlas = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = "VBL50",
+                                type = atlasType,
                                 transportable = { randomTransportable = false },
                                 skill = "Excellent",
                                 y = baseZ + 200, x = baseX, name = uAtlas_name,
@@ -2165,11 +2210,11 @@ function SIT_Callbacks.onSimulationFrame()
                             y = baseZ + 200, x = baseX, name = gAtlas_name,
                             start_time = 0, task = "Ground Nothing",
                         }
-                        -- Cubi : TRM2000 200m ouest — preview shows it to the left
+                        -- Cubi : 200m ouest — preview shows it to the left
                         local grpCubi = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = "TRM2000",
+                                type = cubiType,
                                 transportable = { randomTransportable = false },
                                 skill = "Excellent",
                                 y = baseZ - 200, x = baseX, name = uCubi_name,
@@ -2182,7 +2227,7 @@ function SIT_Callbacks.onSimulationFrame()
                         local grpPam = {
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {[1] = {
-                                type = "TRMMISTRAL",
+                                type = pamelaType,
                                 transportable = { randomTransportable = false },
                                 skill = "Excellent",
                                 y = baseZ - 200, x = baseX + 20, name = uPam_name,
@@ -2275,7 +2320,7 @@ function SIT_Callbacks.onSimulationFrame()
                         trigger.action.outTextForCoalition(coalSide,
                             string.format("Peloton 105 (slot %%d) deploye par %%s", slot, "%s"), 15)
                     end)
-                ]==], slot, lat, lon, countryId, author:gsub("'","\\'"):gsub('"','\\"'))
+                ]==], slot, lat, lon, countryId, t105, t106, t107, tAtlas, tCubi, tPamela, author:gsub("'","\\'"):gsub('"','\\"'))
                 
                 local ok, err = pcall(net.dostring_in, SIT.env, spawnCode)
                 log.write("SIT_World", log.INFO, "SPAWN 105 slot=" .. slot .. " by " .. author .. " at " .. lat .. "," .. lon .. " ok=" .. tostring(ok))
@@ -2300,12 +2345,32 @@ function SIT_Callbacks.onSimulationFrame()
             local lat = tonumber(line:match('"lat":([%-]?[%d%.]+)'))
             local lon = tonumber(line:match('"lon":([%-]?[%d%.]+)'))
             local coa = tonumber(line:match('"coalition":(%d+)')) or 2
+            local nation = line:match('"nation":"([^"]*)"') or "french"
             local author = line:match('"author":"([^"]*)"') or "SIT"
             
             if lat and lon then
                 SIT.xlCurrentSlot = SIT.xlCurrentSlot + 1
                 local slot = SIT.xlCurrentSlot
                 local countryId = (coa == 1) and 81 or 80
+                
+                -- V19: nation-based unit types for CSAR.
+                -- MERCURE (light) = 3 units, CHROME (heavy) = 4 units.
+                --   french_xl/french_rcr/french : FrenchPack mod units (CSAR is identical in both FrenchPack variants)
+                --   german : base DCS — MERCURE = 1 TPZ + 2 Marder, CHROME = 2 Marder + 2 Leopard1A3
+                --   russian: base DCS — MERCURE = 1 Tigr + 2 BTR-82A, CHROME = 2 CHAP_BMPT + 2 BMP-3
+                local mercT1, mercT2, mercT3
+                local chromeT1, chromeT2, chromeT3, chromeT4
+                if nation == "german" then
+                    mercT1, mercT2, mercT3 = "TPZ", "Marder", "Marder"
+                    chromeT1, chromeT2, chromeT3, chromeT4 = "Marder", "Marder", "Leopard1A3", "Leopard1A3"
+                elseif nation == "russian" then
+                    mercT1, mercT2, mercT3 = "Tigr_233036", "BTR-82A", "BTR-82A"
+                    chromeT1, chromeT2, chromeT3, chromeT4 = "CHAP_BMPT", "CHAP_BMPT", "BMP-3", "BMP-3"
+                else
+                    -- french_xl, french_rcr, or legacy "french" (all use same CSAR units)
+                    mercT1, mercT2, mercT3 = "VBL50", "VAB_50", "VABH"
+                    chromeT1, chromeT2, chromeT3, chromeT4 = "SEPAR", "SEPAR", "VBCI", "VBCI"
+                end
                 
                 local spawnCode = string.format([==[
                     pcall(function()
@@ -2314,6 +2379,8 @@ function SIT_Callbacks.onSimulationFrame()
                         local baseX = p.x
                         local baseZ = p.z
                         local countryId = %d
+                        local mercT1, mercT2, mercT3 = "%s", "%s", "%s"
+                        local chromeT1, chromeT2, chromeT3, chromeT4 = "%s", "%s", "%s", "%s"
                         
                         local gMercure_name = "MERCURE_" .. slot
                         local gChrome_name  = "CHROME_" .. slot
@@ -2324,24 +2391,24 @@ function SIT_Callbacks.onSimulationFrame()
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {
                                 [1] = {
-                                    type = "VBL50",
+                                    type = mercT1,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = mercZ, x = baseX, name = "Mercure_VBL_" .. slot,
+                                    y = mercZ, x = baseX, name = "Mercure_1_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                                 [2] = {
-                                    type = "VAB_50",
+                                    type = mercT2,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = mercZ, x = baseX - 50, name = "Mercure_VAB_" .. slot,
+                                    y = mercZ, x = baseX - 50, name = "Mercure_2_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                                 [3] = {
-                                    type = "VABH",
+                                    type = mercT3,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = mercZ, x = baseX + 50, name = "Mercure_VABH_" .. slot,
+                                    y = mercZ, x = baseX + 50, name = "Mercure_3_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                             },
@@ -2355,31 +2422,31 @@ function SIT_Callbacks.onSimulationFrame()
                             visible = false, taskSelected = true, route = {}, tasks = {}, hidden = false,
                             units = {
                                 [1] = {
-                                    type = "SEPAR",
+                                    type = chromeT1,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = chromeZ, x = baseX - 75, name = "Chrome_SEPAR1_" .. slot,
+                                    y = chromeZ, x = baseX - 75, name = "Chrome_1_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                                 [2] = {
-                                    type = "SEPAR",
+                                    type = chromeT2,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = chromeZ, x = baseX - 25, name = "Chrome_SEPAR2_" .. slot,
+                                    y = chromeZ, x = baseX - 25, name = "Chrome_2_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                                 [3] = {
-                                    type = "VBCI",
+                                    type = chromeT3,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = chromeZ, x = baseX + 25, name = "Chrome_VBCI1_" .. slot,
+                                    y = chromeZ, x = baseX + 25, name = "Chrome_3_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                                 [4] = {
-                                    type = "VBCI",
+                                    type = chromeT4,
                                     transportable = { randomTransportable = false },
                                     skill = "Excellent",
-                                    y = chromeZ, x = baseX + 75, name = "Chrome_VBCI2_" .. slot,
+                                    y = chromeZ, x = baseX + 75, name = "Chrome_4_" .. slot,
                                     playerCanDrive = true, heading = 0,
                                 },
                             },
@@ -2394,7 +2461,10 @@ function SIT_Callbacks.onSimulationFrame()
                         trigger.action.outTextForCoalition(coalSide,
                             string.format("Groupes CSAR (slot %%d) deployes par %%s", slot, "%s"), 15)
                     end)
-                ]==], slot, lat, lon, countryId, author:gsub("'","\\'"):gsub('"','\\"'))
+                ]==], slot, lat, lon, countryId,
+                     mercT1, mercT2, mercT3,
+                     chromeT1, chromeT2, chromeT3, chromeT4,
+                     author:gsub("'","\\'"):gsub('"','\\"'))
                 
                 local ok, err = pcall(net.dostring_in, SIT.env, spawnCode)
                 log.write("SIT_World", log.INFO, "SPAWN CSAR slot=" .. slot .. " by " .. author .. " at " .. lat .. "," .. lon .. " ok=" .. tostring(ok))

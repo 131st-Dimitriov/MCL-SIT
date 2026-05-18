@@ -2332,7 +2332,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     <line x1="22" y1="0" x2="28" y2="0" stroke="currentColor" stroke-width="1"/>
                 </svg>
                 <span class="sit-title-full" style="font-size:22px;font-weight:bold;letter-spacing:4px;">MCL<span style="color:#888;"> - </span>SIT</span>
-                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V18</span>
+                <span class="sit-title-version" style="font-size:9px;opacity:0.5;letter-spacing:3px;align-self:flex-end;padding-bottom:4px;">V19</span>
             </div>
             <div id="status">
                 <button onclick="openTutorial()" id="btn-help" data-i18n="btn.help">? AIDE</button>
@@ -2976,6 +2976,32 @@ body.combat-tablet #left-actions.left-actions-hidden,
             <p style="font-size:10px;color:#888;margin-top:4px;text-align:center;">Sélectionner une unité d'artillerie sur la carte</p>
         </div>
         <div style="margin-top:8px;"><button class="btn-secondary" onclick="closeJFOModal()" style="width:100%;">Annuler</button></div>
+    </div></div>
+
+    <!-- V19: nation selection modal for 105/CSAR variants -->
+    <div class="modal" id="nation-modal"><div class="modal-content" style="min-width:320px;">
+        <div class="modal-title" style="color:#ff8000;">PAYS — Variante 105 / CSAR</div>
+        <p style="font-size:11px;color:#aaa;margin-bottom:10px;">Choix de la nationalité pour les spawns 105 et CSAR.</p>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+            <button class="btn-nation-choice" data-nation="french_xl" id="btn-nation-xl"
+                style="width:100%;padding:8px 10px;text-align:left;background:rgba(255,128,0,0.12);border:1px solid #ff8000;color:#ff8000;border-radius:3px;cursor:pointer;font-family:'Courier New',monospace;font-size:12px;letter-spacing:1px;">
+                FrenchPack XL <span style="font-size:9px;color:#aaa;display:block;margin-top:2px;letter-spacing:0;">3× Leclerc + Atlas/Cubi/Pamela</span>
+            </button>
+            <button class="btn-nation-choice" data-nation="french_rcr" id="btn-nation-rcr"
+                style="width:100%;padding:8px 10px;text-align:left;background:rgba(255,128,0,0.12);border:1px solid #ff8000;color:#ff8000;border-radius:3px;cursor:pointer;font-family:'Courier New',monospace;font-size:12px;letter-spacing:1px;">
+                FrenchPack 10RCR <span style="font-size:9px;color:#aaa;display:block;margin-top:2px;letter-spacing:0;">2× SEPAR + VBCI + Atlas/Cubi/Pamela</span>
+            </button>
+            <button class="btn-nation-choice" data-nation="german" id="btn-nation-german"
+                style="width:100%;padding:8px 10px;text-align:left;background:rgba(180,180,180,0.10);border:1px solid #aaa;color:#ddd;border-radius:3px;cursor:pointer;font-family:'Courier New',monospace;font-size:12px;letter-spacing:1px;">
+                Allemagne <span style="font-size:9px;color:#888;display:block;margin-top:2px;letter-spacing:0;">3× Leopard-2 + TPZ/M 818/Roland ADS</span>
+            </button>
+            <button class="btn-nation-choice" data-nation="russian" id="btn-nation-russian"
+                style="width:100%;padding:8px 10px;text-align:left;background:rgba(180,180,180,0.10);border:1px solid #aaa;color:#ddd;border-radius:3px;cursor:pointer;font-family:'Courier New',monospace;font-size:12px;letter-spacing:1px;">
+                Russie <span style="font-size:9px;color:#888;display:block;margin-top:2px;letter-spacing:0;">3× T-90M + BRDM-2/Ural-4320T/Tunguska</span>
+            </button>
+        </div>
+        <p id="nation-modal-hint" style="font-size:10px;color:#888;margin-top:10px;display:none;">Les variantes FrenchPack sont indisponibles : modpack 131st (ou FrenchPack public) absent côté serveur.</p>
+        <div style="margin-top:10px;"><button class="btn-secondary" onclick="closeNationModal()" style="width:100%;">Fermer</button></div>
     </div></div>
 
     <div class="modal" id="jfo-fire-modal"><div class="modal-content" style="min-width:300px;">
@@ -3700,6 +3726,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
         // Apply on load
         document.addEventListener('DOMContentLoaded', () => {
             applyTranslations();
+            try{ _initSpawnNation(); }catch(e){}
         });
         
         // ============================================
@@ -4724,7 +4751,30 @@ body.combat-tablet #left-actions.left-actions-hidden,
             if(!mousePos||isDragging)return;
             const tw=canvasToWorld(mousePos.x,mousePos.y);
             const ctrlKey=e.ctrlKey||e.metaKey;
-            
+
+            // V19 FIX: JFO MAP-mode unit selection gets an early, dedicated handler.
+            // The previous logic sat deep in the click chain after many other checks,
+            // and a regression caused the click to never reach it. Handling it up-front
+            // (right after the drag guard) makes it robust.
+            if(jfoState==='selectUnit'){
+                let bestArty=null,bestD=26; // generous radius — matches the highlight ring (~22px)
+                vehicleData.allies.forEach(a=>{
+                    const typ=unitTypeMap[a.name]||a.type||'UNK';
+                    if(typ!=='ARTY')return;
+                    const p=worldToCanvas(a.x,a.y);
+                    const d=Math.sqrt((p.x-mousePos.x)**2+(p.y-mousePos.y)**2);
+                    if(d<bestD){bestD=d;bestArty=a;}
+                });
+                if(bestArty){
+                    jfoSelectedGroup=bestArty.groupName||bestArty.unitName||bestArty.name;
+                    jfoState=null;
+                    startJFOTargeting();
+                }
+                // In selectUnit mode, swallow the click whether or not we hit something —
+                // clicking empty space shouldn't fall through to map panning / selection.
+                return;
+            }
+
             // V15 (Option A): clic sur une icône PCDB existante a la priorité absolue —
             // dans tous les modes (sauf DELETE qui supprime, géré plus bas).
             if (placementMode !== 'DELETE') {
@@ -4852,16 +4902,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 if(Math.sqrt((p.x-mousePos.x)**2+(p.y-mousePos.y)**2)<15)clickedAlly=a;
             });
             if(clickedAlly&&!placementMode){
-                // JFO MAP mode
-                if(jfoState==='selectUnit'){
-                    const typ=unitTypeMap[clickedAlly.name]||clickedAlly.type||'UNK';
-                    if(typ==='ARTY'){
-                        jfoSelectedGroup=clickedAlly.groupName||clickedAlly.unitName||clickedAlly.name;
-                        jfoState=null;
-                        startJFOTargeting();
-                        return;
-                    }
-                }
+                // (V19: JFO selectUnit handled earlier, up-front in this listener)
                 // Find group leader: first unit in group (by array order)
                 const grpName=clickedAlly.groupName;
                 let leader=clickedAlly;
@@ -4999,7 +5040,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 planEditMode=null;tempWaypoints=[];
                 const bp=document.getElementById('btn-plan');if(bp){bp.classList.remove('active');bp.style.background='';}
                 const bd=document.getElementById('btn-draw');if(bd){bd.classList.remove('active');bd.style.background='';}
-                closePlanModal();closeCoordModal();closeLoadModal();closeTutorial();closeMapConfigModal();closeTGTModal();closeTGTCoordModal();closeTGTRelativeModal();closeRefaltModal();cancelJFOFire();closeJFOModal();cancelDronePlanning();closeChatModal();cancel105Placement();cancelCSARPlacement();closeToolsModal();
+                closePlanModal();closeCoordModal();closeLoadModal();closeTutorial();closeMapConfigModal();closeTGTModal();closeTGTCoordModal();closeTGTRelativeModal();closeRefaltModal();cancelJFOFire();closeJFOModal();cancelDronePlanning();closeChatModal();cancel105Placement();cancelCSARPlacement();closeToolsModal();closeNationModal();
                 // V15: PCDB cleanup
                 closePCDBModal();closePCDBCoordModal();closePCDBTextModal();
                 if(pcdbMode==='editing')pcdbMode=null;
@@ -8101,24 +8142,132 @@ body.combat-tablet #left-actions.left-actions-hidden,
         setInterval(updateUnitControlPanel,500);
         
         // ============ DRONE SYSTEM ============
+        // V19: nationality selector for 105 / CSAR reinforcements (button + modal).
+        // - french_xl  → FrenchPack — peloton 105 (3× Leclerc_XXI + Atlas/Cubi/Pamela)
+        // - french_rcr → FrenchPack — 10RCR (2× SEPAR + 1× VBCI + Atlas/Cubi/Pamela)
+        //   Both FrenchPack variants require the 131st modpack OR public FrenchPack
+        // - german  → base DCS, always available
+        // - russian → base DCS (incl. now-official CHAP_ units), always available
+        const NATION_LABELS = {
+            french_xl:  'FrenchPack XL',
+            french_rcr: 'FrenchPack 10RCR',
+            german:     'Allemagne',
+            russian:    'Russie'
+        };
+        let _currentNation = 'german'; // backing state, persisted in localStorage
+        function getSpawnNation(){ return _currentNation; }
+        function isFrenchNation(n){
+            return n==='french_xl' || n==='french_rcr' || n==='french';
+        }
+        function _updatePaysLabel(){
+            // V19.1: the PAYS header button was removed; the nation is now chosen
+            // through the modal that opens when 105/CSAR is clicked. Kept as a no-op
+            // so existing callers (setSpawnNation/_initSpawnNation) still work.
+        }
+        function setSpawnNation(n, persist){
+            if(!NATION_LABELS[n]) return;
+            _currentNation = n;
+            _updatePaysLabel();
+            if(persist){
+                try{ localStorage.setItem('mclsit_spawn_nation', n); }catch(e){}
+            }
+        }
+        function _initSpawnNation(){
+            // Restore persisted choice (migrating any legacy "french" → "french_xl")
+            let saved = null;
+            try{
+                saved = localStorage.getItem('mclsit_spawn_nation');
+                if(saved === 'french') saved = 'french_xl';
+            }catch(e){}
+            if(saved && NATION_LABELS[saved]){
+                _currentNation = saved;
+            } else {
+                _currentNation = 'german'; // default
+            }
+            _updatePaysLabel();
+        }
+        // Refresh the FrenchPack options' availability based on mods status,
+        // and auto-promote to FrenchPack XL the first time mods are detected
+        // (unless the user has explicitly picked something else already).
+        function _refreshNationOptions(){
+            const btnXL  = document.getElementById('btn-nation-xl');
+            const btnRCR = document.getElementById('btn-nation-rcr');
+            const hint   = document.getElementById('nation-modal-hint');
+            const modsOk = modsStatus && modsStatus.modpack;
+            if(btnXL){
+                btnXL.disabled = !modsOk;
+                btnXL.style.opacity = modsOk ? '1' : '0.4';
+                btnXL.style.cursor  = modsOk ? 'pointer' : 'not-allowed';
+            }
+            if(btnRCR){
+                btnRCR.disabled = !modsOk;
+                btnRCR.style.opacity = modsOk ? '1' : '0.4';
+                btnRCR.style.cursor  = modsOk ? 'pointer' : 'not-allowed';
+            }
+            if(hint) hint.style.display = modsOk ? 'none' : '';
+            // If a FrenchPack variant was selected but mods vanished, fall back to German
+            if(!modsOk && isFrenchNation(_currentNation)){
+                setSpawnNation('german', true);
+            }
+            // If mods are detected and the user has no persisted choice yet, default to FrenchPack XL
+            if(modsOk){
+                let saved = null;
+                try{ saved = localStorage.getItem('mclsit_spawn_nation'); }catch(e){}
+                if(!saved){
+                    setSpawnNation('french_xl', false); // don't persist — user hasn't actively chosen
+                }
+            }
+        }
+        function openNationModal(){
+            _refreshNationOptions(); // sync disabled state before showing
+            const m = document.getElementById('nation-modal');
+            if(m) m.classList.add('visible');
+        }
+        function closeNationModal(){
+            const m = document.getElementById('nation-modal');
+            if(m) m.classList.remove('visible');
+            _pendingSpawnType = null; // cancel any pending spawn intent
+        }
+        // Wire choice buttons (delegation on the modal)
+        document.addEventListener('DOMContentLoaded', () => {
+            const m = document.getElementById('nation-modal');
+            if(!m) return;
+            m.addEventListener('click', (e) => {
+                const btn = e.target.closest('.btn-nation-choice');
+                if(!btn || btn.disabled) return;
+                const n = btn.getAttribute('data-nation');
+                if(!n) return;
+                setSpawnNation(n, true);
+                // Capture which spawn was pending BEFORE closing the modal,
+                // because closeNationModal() resets _pendingSpawnType.
+                const pending = _pendingSpawnType;
+                const m2 = document.getElementById('nation-modal');
+                if(m2) m2.classList.remove('visible');
+                _pendingSpawnType = null;
+                if(pending === '105') _proceed105Placement();
+                else if(pending === 'csar') _proceedCSARPlacement();
+            });
+        });
+
+        // V19: 105 / CSAR placement now opens the nation modal first.
+        // After the user picks a nation, _proceed105Placement / _proceedCSARPlacement
+        // actually enters the click-on-map mode.
+        let _pendingSpawnType = null; // '105' | 'csar' | null — what to do after modal pick
+
         function start105Placement(){
-            // Check mods
-            if(!modsStatus){
-                alert("Statut des mods serveur inconnu. Vérifiez que le serveur DCS est connecté.");
-                return;
-            }
-            if(!modsStatus.modpack){
-                alert("Impossible : le MODPACK 131st n'est pas installé sur le serveur (Leclerc_XXI, VBL50, TRM2000, TRMMISTRAL requis).");
-                return;
-            }
             if(!multiConnected){
-                alert("Fonction multi requise : connectez-vous d'abord à un serveur SIT.");
+                sitAlert("Fonction multi requise : connectez-vous d'abord à un serveur SIT.");
                 return;
             }
+            _pendingSpawnType = '105';
+            openNationModal();
+        }
+        function _proceed105Placement(){
+            const nation = getSpawnNation();
             spawn105Mode=true;
             const btn=document.getElementById('btn-105');
             if(btn){btn.style.background='rgba(255,128,0,0.4)';}
-            alert("Cliquez sur la carte pour placer le peloton 105.");
+            sitAlert("Cliquez sur la carte pour placer le peloton 105 ("+(NATION_LABELS[nation]||nation)+").");
         }
         function cancel105Placement(){
             spawn105Mode=false;
@@ -8128,31 +8277,27 @@ body.combat-tablet #left-actions.left-actions-hidden,
         function confirm105Placement(lat,lon){
             // Coalition: 1=red, 2=blue (coalition.side enum)
             const coa=commanderCoalition==='red'?1:2;
+            const nation=getSpawnNation();
             if(multiConnected&&multiWS&&multiWS.readyState===1){
-                try{multiWS.send(JSON.stringify({type:'spawn105',lat:lat,lon:lon,coalition:coa}));
-                    appendChatMessage({author:'[105]',coalition:'all',text:'Peloton 105 déployé à '+lat.toFixed(4)+','+lon.toFixed(4),timestamp:Date.now()});
-                }catch(e){alert('Erreur envoi: '+e.message);}
+                try{multiWS.send(JSON.stringify({type:'spawn105',lat:lat,lon:lon,coalition:coa,nation:nation}));
+                    appendChatMessage({author:'[105]',coalition:'all',text:'Peloton 105 ('+(NATION_LABELS[nation]||nation)+') déployé à '+lat.toFixed(4)+','+lon.toFixed(4),timestamp:Date.now()});
+                }catch(e){sitAlert('Erreur envoi: '+e.message);}
             }
             cancel105Placement();
         }
         
-        // CSAR placement: spawn MERCURE + CHROME groups only (no 105/106/107/Atlas/Cubi/Pamela)
+        // CSAR placement: spawn MERCURE + CHROME groups only
         function startCSARPlacement(){
             if(!multiConnected){sitAlert('Vous devez être connecté au serveur SIT.');return;}
-            function _proceedCSAR(){
-                spawnCSARMode=true;
-                const btn=document.getElementById('btn-csar');
-                if(btn){btn.style.background='rgba(0,200,120,0.4)';}
-                sitAlert('Cliquez sur la carte pour placer les groupes CSAR (MERCURE + CHROME).');
-            }
-            if(!modsStatus||!modsStatus.modpack){
-                sitConfirm('Mods 131st indisponibles côté serveur — le spawn risque d\'échouer.\nContinuer ?').then(function(ok){
-                    if(!ok) return;
-                    _proceedCSAR();
-                });
-                return;
-            }
-            _proceedCSAR();
+            _pendingSpawnType = 'csar';
+            openNationModal();
+        }
+        function _proceedCSARPlacement(){
+            const nation = getSpawnNation();
+            spawnCSARMode=true;
+            const btn=document.getElementById('btn-csar');
+            if(btn){btn.style.background='rgba(0,200,120,0.4)';}
+            sitAlert('Cliquez sur la carte pour placer les groupes CSAR ('+(NATION_LABELS[nation]||nation)+').');
         }
         function cancelCSARPlacement(){
             spawnCSARMode=false;
@@ -8161,10 +8306,11 @@ body.combat-tablet #left-actions.left-actions-hidden,
         }
         function confirmCSARPlacement(lat,lon){
             const coa=commanderCoalition==='red'?1:2;
+            const nation=getSpawnNation();
             if(multiConnected&&multiWS&&multiWS.readyState===1){
-                try{multiWS.send(JSON.stringify({type:'spawnCSAR',lat:lat,lon:lon,coalition:coa}));
-                    appendChatMessage({author:'[CSAR]',coalition:'all',text:'Groupes MERCURE + CHROME déployés à '+lat.toFixed(4)+','+lon.toFixed(4),timestamp:Date.now()});
-                }catch(e){alert('Erreur envoi: '+e.message);}
+                try{multiWS.send(JSON.stringify({type:'spawnCSAR',lat:lat,lon:lon,coalition:coa,nation:nation}));
+                    appendChatMessage({author:'[CSAR]',coalition:'all',text:'Groupes MERCURE + CHROME ('+nation+') déployés à '+lat.toFixed(4)+','+lon.toFixed(4),timestamp:Date.now()});
+                }catch(e){sitAlert('Erreur envoi: '+e.message);}
             }
             cancelCSARPlacement();
         }
@@ -8175,18 +8321,23 @@ body.combat-tablet #left-actions.left-actions-hidden,
             const badge=btn105?document.getElementById('btn-105-badge'):null;
             const badgeCSAR=btnCSAR?document.getElementById('btn-csar-badge'):null;
             const modsOk=modsStatus&&modsStatus.modpack;
+            // V19: 105/CSAR buttons are ALWAYS enabled now — the German and Russian
+            // variants use base DCS units and don't need any mod. Only the FrenchPack
+            // option in the nationality selector greys out when the modpack is absent.
             if(btn105){
-                btn105.style.opacity=modsOk?'1':'0.4';
-                btn105.style.cursor=modsOk?'pointer':'not-allowed';
-                btn105.title=modsOk?'Spawn peloton 105 (Leclerc + Atlas/Cubi/Pamela)':'MODPACK 131st indisponible sur le serveur';
+                btn105.style.opacity='1';
+                btn105.style.cursor='pointer';
+                btn105.title='Spawn peloton 105 — variante selon le sélecteur de nationalité';
                 if(badge)badge.style.display=modsOk?'none':'block';
             }
             if(btnCSAR){
-                btnCSAR.style.opacity=modsOk?'1':'0.4';
-                btnCSAR.style.cursor=modsOk?'pointer':'not-allowed';
-                btnCSAR.title=modsOk?'Spawn groupes CSAR (MERCURE + CHROME)':'MODPACK 131st indisponible sur le serveur';
+                btnCSAR.style.opacity='1';
+                btnCSAR.style.cursor='pointer';
+                btnCSAR.title='Spawn groupes CSAR — variante selon le sélecteur de nationalité';
                 if(badgeCSAR)badgeCSAR.style.display=modsOk?'none':'block';
             }
+            // Refresh the FrenchPack option availability
+            try{ _refreshNationOptions(); }catch(e){}
         }
         
         function startDronePlanning(){
@@ -10970,7 +11121,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span style="color:#778;">-</span> Système d\'Information Tactique</span>'+
-                '<span class="sit-title-version">V18</span>';
+                '<span class="sit-title-version">V19</span>';
         }
 
         // Marque châssis.
@@ -11011,14 +11162,14 @@ body.combat-tablet #left-actions.left-actions-hidden,
         if(typeof configMenuVisible!=='undefined') configMenuVisible=false;
 
         // Titre logiciel demandé.
-        document.title='MCL-SIT V18';
+        document.title='MCL-SIT V19';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+ 
-                '<span class="sit-title-version">V18</span>';
+                '<span class="sit-title-version">V19</span>';
         }
 
         // Marque châssis.
@@ -11159,14 +11310,14 @@ body.combat-tablet #title .sit-title-version{
         document.body.classList.add('icone','combat-tablet');
 
         // Titre final : MCL - SIT V15, centré dans sa case.
-        document.title='MCL-SIT V18';
+        document.title='MCL-SIT V19';
         var titleEl=document.getElementById('title');
         if(titleEl){
             var logo = titleEl.querySelector('svg');
             var logoHTML = logo ? logo.outerHTML : '';
             titleEl.innerHTML = logoHTML +
                 '<span class="sit-title-full">MCL <span class="title-dash">-</span> SIT</span>'+
-                '<span class="sit-title-version">V18</span>';
+                '<span class="sit-title-version">V19</span>';
         }
 
         // Sécurise le retrait de CONFIG au cas où une version antérieure le réinjecte.
