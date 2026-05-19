@@ -1029,6 +1029,15 @@ function processHookMessage(content) {
         } catch (e) {
             console.log('  [!] O parse error: ' + e.message);
         }
+    } else if (prefix === 'R') {
+        // V19.1: on-road path preview computed by the hook (formation=on_road).
+        // Broadcast to all clients so they can render the actual road route.
+        try {
+            const pathData = JSON.parse(data);
+            broadcastAll({ type: 'unitPathPreview', unitName: pathData.unit, pts: pathData.pts || [] });
+        } catch (e) {
+            console.log('  [!] R parse error: ' + e.message);
+        }
     } else if (prefix === 'M') {
         // V10: mission lifecycle events from the hook (e.g. mission reset)
         try {
@@ -1060,7 +1069,7 @@ udpHook.on('message', (msg) => {
     try {
         const raw = msg.toString('utf8');
         const prefix = raw.charAt(0) === 'S' ? raw.charAt(1) : (raw.charAt(0) === 'F' ? 'F:' + raw.substring(2, raw.indexOf('|', 2)) : '?');
-        if (prefix !== 'W' && prefix !== 'F:W' && prefix !== 'P' && prefix !== 'F:P' && prefix !== 'O' && prefix !== 'F:O' && prefix !== 'M' && prefix !== 'F:M') {
+        if (prefix !== 'W' && prefix !== 'F:W' && prefix !== 'P' && prefix !== 'F:P' && prefix !== 'O' && prefix !== 'F:O' && prefix !== 'M' && prefix !== 'F:M' && prefix !== 'R' && prefix !== 'F:R') {
             console.log('  [UDP] received: ' + prefix + ' (' + raw.length + ' bytes)');
         }
         if (raw.charAt(0) === 'S') {

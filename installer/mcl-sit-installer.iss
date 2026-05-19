@@ -11,7 +11,7 @@
 ;; ============================================================================
 
 #define AppName "MCL-SIT"
-#define AppVersion "19.0.0"
+#define AppVersion "19.1.0"
 #define AppPublisher "131st-Dimitriov"
 #define AppExeName "MCL-SIT.exe"
 #define SourceDir "..\dist\win-unpacked"
@@ -162,10 +162,17 @@ begin
   else if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS')) then
     AutoCl := ExpandConstant('{userdocs}\..\Saved Games\DCS');
 
-  // Auto-detect dedicated server install
+  // Auto-detect dedicated server install — try multiple naming conventions
+  // (DCS users sometimes have DCS_Serverrelease, DCS.dcs_serverrelease, DCS.server, etc.)
   AutoSr := '';
   if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS_Serverrelease')) then
-    AutoSr := ExpandConstant('{userdocs}\..\Saved Games\DCS_Serverrelease');
+    AutoSr := ExpandConstant('{userdocs}\..\Saved Games\DCS_Serverrelease')
+  else if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.dcs_serverrelease')) then
+    AutoSr := ExpandConstant('{userdocs}\..\Saved Games\DCS.dcs_serverrelease')
+  else if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.server')) then
+    AutoSr := ExpandConstant('{userdocs}\..\Saved Games\DCS.server')
+  else if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.serverrelease')) then
+    AutoSr := ExpandConstant('{userdocs}\..\Saved Games\DCS.serverrelease');
 
   // --- Classique block ---
   CkClassique := TNewCheckBox.Create(DCSPage);
@@ -261,11 +268,21 @@ end;
 
 procedure InstallHookTo(DCSPath: String);
 var
-  HookDir, HookFile: String;
+  HookDir, HookFile, SourceFile: String;
+  CopyOk: Boolean;
 begin
   if Trim(DCSPath) = '' then exit;
   HookDir := DCSPath + '\Scripts\Hooks';
   HookFile := HookDir + '\SIT_WorldHook.lua';
+  SourceFile := ExpandConstant('{tmp}\SIT_WorldHook.lua');
+  Log('[MCL-SIT] InstallHookTo: dest=' + HookFile);
+  Log('[MCL-SIT] InstallHookTo: source=' + SourceFile);
+  if not FileExists(SourceFile) then begin
+    MsgBox('Erreur interne : le fichier source du hook est introuvable :' #13#10 + SourceFile + #13#10 +
+           'L''installeur a peut-être été corrompu — réessayez en téléchargeant à nouveau.',
+           mbError, MB_OK);
+    exit;
+  end;
   if not DirExists(HookDir) then begin
     if not ForceDirectories(HookDir) then begin
       MsgBox('Impossible de créer le dossier :' #13#10 + HookDir + #13#10 +
@@ -274,16 +291,53 @@ begin
       exit;
     end;
   end;
-  if not FileCopy(ExpandConstant('{tmp}\SIT_WorldHook.lua'), HookFile, False) then begin
-    MsgBox('Impossible de copier le hook DCS vers :' #13#10 + HookFile,
+  // If a previous hook is loaded by DCS, it stays locked by the process — try to detect.
+  if FileExists(HookFile) then begin
+    // Try to delete first so a clean copy can land. If delete fails, DCS is probably running.
+    if not DeleteFile(HookFile) then begin
+      MsgBox('Le fichier hook existant ne peut pas être remplacé :' #13#10 + HookFile + #13#10 + #13#10 +
+             'Cause probable : DCS World est actuellement lancé et verrouille le fichier.' #13#10 +
+             'Fermez DCS World complètement puis relancez l''installation.',
+             mbError, MB_OK);
+      exit;
+    end;
+  end;
+  CopyOk := FileCopy(SourceFile, HookFile, False);
+  if not CopyOk then begin
+    MsgBox('Impossible de copier le hook DCS vers :' #13#10 + HookFile + #13#10 + #13#10 +
+           'Cause probable : DCS World tourne, permissions insuffisantes, ou disque plein.' #13#10 +
+           'Fermez DCS et réessayez.',
+           mbError, MB_OK);
+    exit;
+  end;
+  // Verify the copy landed and report version
+  if FileExists(HookFile) then begin
+    Log('[MCL-SIT] Hook installed OK: ' + HookFile);
+  end else begin
+    MsgBox('Le hook semble copié mais le fichier final est introuvable :' #13#10 + HookFile,
            mbError, MB_OK);
   end;
 end;
 
 procedure InstallHooks();
+var
+  Installed: String;
 begin
-  if CkClassique.Checked then InstallHookTo(EdClassique.Text);
-  if CkServer.Checked then InstallHookTo(EdServer.Text);
+  Installed := '';
+  if CkClassique.Checked then begin
+    InstallHookTo(EdClassique.Text);
+    Installed := Installed + '  • ' + EdClassique.Text + '\Scripts\Hooks\' + #13#10;
+  end;
+  if CkServer.Checked then begin
+    InstallHookTo(EdServer.Text);
+    Installed := Installed + '  • ' + EdServer.Text + '\Scripts\Hooks\' + #13#10;
+  end;
+  if Installed <> '' then begin
+    MsgBox('Hook DCS installé dans :' #13#10 + Installed + #13#10 +
+           'Au prochain lancement de DCS, vérifiez dans dcs.log la ligne :' #13#10 +
+           '   "=== SIT World Hook V19.1 loaded ..."',
+           mbInformation, MB_OK);
+  end;
 end;
 
 procedure AddFirewallRules();
@@ -363,6 +417,18 @@ begin
     end;
     if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS_Serverrelease\Scripts\Hooks')) then begin
       HookFile := ExpandConstant('{userdocs}\..\Saved Games\DCS_Serverrelease\Scripts\Hooks\SIT_WorldHook.lua');
+      if FileExists(HookFile) then DeleteFile(HookFile);
+    end;
+    if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.dcs_serverrelease\Scripts\Hooks')) then begin
+      HookFile := ExpandConstant('{userdocs}\..\Saved Games\DCS.dcs_serverrelease\Scripts\Hooks\SIT_WorldHook.lua');
+      if FileExists(HookFile) then DeleteFile(HookFile);
+    end;
+    if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.server\Scripts\Hooks')) then begin
+      HookFile := ExpandConstant('{userdocs}\..\Saved Games\DCS.server\Scripts\Hooks\SIT_WorldHook.lua');
+      if FileExists(HookFile) then DeleteFile(HookFile);
+    end;
+    if DirExists(ExpandConstant('{userdocs}\..\Saved Games\DCS.serverrelease\Scripts\Hooks')) then begin
+      HookFile := ExpandConstant('{userdocs}\..\Saved Games\DCS.serverrelease\Scripts\Hooks\SIT_WorldHook.lua');
       if FileExists(HookFile) then DeleteFile(HookFile);
     end;
   end;

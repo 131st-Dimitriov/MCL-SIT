@@ -186,6 +186,37 @@ function SIT_Callbacks.onSimulationFrame()
         end
         log.write("SIT_World", log.INFO, "Using env: " .. SIT.env)
         
+        -- V19.1 ONE-SHOT PROBE: test if land.findPathOnRoads is available in this env.
+        -- Runs once at hook init. The result is logged so we can decide whether to
+        -- ship the on-road preview from this env or move it to the mission env.
+        pcall(function()
+            local probeCode = [[
+                local r = {}
+                r.land_type = type(land)
+                if type(land) == 'table' then
+                    r.findPath_type = type(land.findPathOnRoads)
+                    r.getClosest_type = type(land.getClosestPointOnRoads)
+                    if type(land.findPathOnRoads) == 'function' then
+                        local ok, sub = pcall(land.findPathOnRoads, 'roads', 0, 0, 1000, 1000)
+                        r.testCall_ok = tostring(ok)
+                        if ok then
+                            r.testCall_type = type(sub)
+                            r.testCall_len = (type(sub) == 'table') and #sub or -1
+                        else
+                            r.testCall_err = tostring(sub)
+                        end
+                    end
+                end
+                r.coord_type = type(coord)
+                r.unit_type = type(Unit)
+                local s = ""
+                for k, v in pairs(r) do s = s .. k .. "=" .. tostring(v) .. " " end
+                return s
+            ]]
+            local ok, probeResult = pcall(net.dostring_in, SIT.env, probeCode)
+            log.write("SIT_World", log.INFO, "PROBE: ok=" .. tostring(ok) .. " result=" .. tostring(probeResult))
+        end)
+        
         -- Init UDP socket (only if not already created)
         if not SIT.udpSocket then
             pcall(function()
@@ -333,8 +364,89 @@ function SIT_Callbacks.onSimulationFrame()
         end
         wpCode = wpCode .. "}"
         
+        -- V19.1: when in on-road mode, compute the actual road path that DCS will
+        -- follow (via land.findPathOnRoads), decimate to ≤20 points total, and
+        -- ship it back as JSON appended to the result string. The hook then
+        -- forwards it via SIT.sendUDP("R", ...) so SIT clients can draw the real route.
+        local computePathCode = ""
+        if formation == "on_road" then
+            -- Build a Lua expression that lists every destination (x, z) pair as a table literal,
+            -- to be assigned inside the orderCode env (where dx1/dz1, dx2/dz2, … are in scope).
+            local destsLiteral = "{"
+            for i = 1, #waypoints do
+                destsLiteral = destsLiteral .. string.format("{x=dx%d,z=dz%d},", i, i)
+            end
+            destsLiteral = destsLiteral .. "}"
+            local unitNameEscaped = safeUnit
+            computePathCode = string.format([[
+                _sit_marker = "started"
+                _sit_land_avail = "?"
+                _sit_first_call_raw = nil
+                _sit_first_call_err = nil
+                _sit_pathJson_local = ""
+                _sit_pathRaw_count = 0
+                _sit_pathPicked_count = 0
+                _sit_land_avail = (type(land) == 'table') and (type(land.findPathOnRoads) == 'function') and "yes" or "no_land"
+                _sit_marker = "after_land_check"
+                local pathPoints = {}
+                local prevX, prevZ = curPos.x, curPos.z
+                local dests = %s
+                _sit_marker = "after_dests"
+                for idx, d in ipairs(dests) do
+                    local ok, sub = pcall(land.findPathOnRoads, 'roads', prevX, prevZ, d.x, d.z)
+                    if idx == 1 then
+                        if ok then
+                            if sub and type(sub) == 'table' then
+                                _sit_first_call_raw = #sub
+                            else
+                                _sit_first_call_raw = -1
+                            end
+                        else
+                            _sit_first_call_err = tostring(sub)
+                        end
+                    end
+                    if ok and sub and type(sub) == 'table' then
+                        for _, pt in ipairs(sub) do
+                            table.insert(pathPoints, {x = pt.x, z = pt.y})
+                        end
+                    end
+                    prevX, prevZ = d.x, d.z
+                end
+                _sit_marker = "after_findpath_loop"
+                local MAX_PTS = 20
+                local picked = {}
+                local total = #pathPoints
+                if total > 0 then
+                    if total <= MAX_PTS then
+                        picked = pathPoints
+                    else
+                        local step = (total - 1) / (MAX_PTS - 1)
+                        for i = 0, MAX_PTS - 1 do
+                            local idx = math.floor(i * step + 0.5) + 1
+                            if idx < 1 then idx = 1 end
+                            if idx > total then idx = total end
+                            table.insert(picked, pathPoints[idx])
+                        end
+                    end
+                end
+                _sit_marker = "after_decimation"
+                local s = '{"unit":"%s","pts":['
+                for i, pt in ipairs(picked) do
+                    local lat, lon = coord.LOtoLL({x = pt.x, y = 0, z = pt.z})
+                    if i > 1 then s = s .. ',' end
+                    s = s .. '[' .. string.format("%%.6f", lat) .. ',' .. string.format("%%.6f", lon) .. ']'
+                end
+                s = s .. ']}'
+                _sit_pathJson_local = s
+                _sit_pathRaw_count = total
+                _sit_pathPicked_count = #picked
+                _sit_marker = "done"
+            ]], destsLiteral, unitNameEscaped)
+        end
+        
         local orderCode = string.format([[
             local result = "error"
+            local pathJson = ""
             pcall(function()
                 local unit = Unit.getByName('%s')
                 if not unit or not Unit.isExist(unit) then result = "unit_not_found" return end
@@ -358,13 +470,91 @@ function SIT_Callbacks.onSimulationFrame()
                         if c then %s end
                     end
                 end, nil, timer.getTime() + 3)
+                -- V19.1: compute on-road path for preview (only when formation = on_road)
+                local _pj = ""
+                local _pCntRaw, _pCntPicked = 0, 0
+                local _landAvail = "?"
+                local _firstRaw = "?"
+                local _firstErr = ""
+                local _marker = "?"
+                -- Clear globals first so off_road / failed runs don't read stale values
+                _sit_marker = nil
+                _sit_land_avail = nil
+                _sit_first_call_raw = nil
+                _sit_first_call_err = nil
+                _sit_pathJson_local = nil
+                _sit_pathRaw_count = nil
+                _sit_pathPicked_count = nil
+                local _innerOk, _innerErrMsg = pcall(function()
+                    %s
+                    _pj = (_sit_pathJson_local or "")
+                    _pCntRaw = (_sit_pathRaw_count or 0)
+                    _pCntPicked = (_sit_pathPicked_count or 0)
+                    _landAvail = tostring(_sit_land_avail)
+                    _firstRaw = tostring(_sit_first_call_raw)
+                    _firstErr = tostring(_sit_first_call_err or "")
+                    _marker = tostring(_sit_marker or "?")
+                end)
+                if not _innerOk then
+                    _firstErr = "INNER_ERR=" .. tostring(_innerErrMsg or "?"):gsub("[,\30\31]", "_")
+                end
+                pathJson = _pj .. "\30" .. tostring(_pCntRaw) .. "," .. tostring(_pCntPicked) .. "," .. _landAvail .. "," .. _firstRaw .. "," .. _firstErr .. "," .. _marker
                 result = "ok"
             end)
-            return result
-        ]], safeUnit, coordCode, wpCode, roeCode, formCode, formCode, formCodeC)
+            return result .. "\31" .. pathJson
+        ]], safeUnit, coordCode, wpCode, roeCode, formCode, formCode, formCodeC, computePathCode)
+        
+        -- V19.1 DEBUG: dump the generated orderCode so we can inspect what's actually being executed
+        if formation == "on_road" then
+            pcall(function()
+                local dbgPath = lfs.writedir() .. [[Logs\sit_orderCode_debug.lua]]
+                local df = io.open(dbgPath, "w")
+                if df then df:write(orderCode); df:close() end
+            end)
+        end
         
         local ok2, result = pcall(net.dostring_in, SIT.env, orderCode)
-        log.write("SIT_World", log.INFO, "ORDER: " .. unitName .. " " .. #waypoints .. " WPs speed=" .. speed .. " roe=" .. roe .. " result=" .. tostring(result))
+        local resultStatus = result
+        local resultPath = nil
+        local rawCnt, pickedCnt = "?", "?"
+        local landAvail, firstRaw, firstErr, marker = "?", "?", "", "?"
+        if type(result) == "string" then
+            local sep = result:find("\31", 1, true)
+            if sep then
+                resultStatus = result:sub(1, sep - 1)
+                local rp = result:sub(sep + 1)
+                if rp and #rp > 0 then
+                    -- rp = <json>\30<raw>,<picked>,<landAvail>,<firstRaw>,<firstErr>,<marker>
+                    local sep2 = rp:find("\30", 1, true)
+                    if sep2 then
+                        local rpJson = rp:sub(1, sep2 - 1)
+                        local cnts = rp:sub(sep2 + 1)
+                        local parts = {}
+                        for piece in (cnts .. ","):gmatch("([^,]*),") do table.insert(parts, piece) end
+                        if parts[1] then rawCnt = parts[1] end
+                        if parts[2] then pickedCnt = parts[2] end
+                        if parts[3] then landAvail = parts[3] end
+                        if parts[4] then firstRaw = parts[4] end
+                        if parts[5] then firstErr = parts[5] end
+                        if parts[6] then marker = parts[6] end
+                        if rpJson and #rpJson > 5 then resultPath = rpJson end
+                    else
+                        if rp and #rp > 5 then resultPath = rp end
+                    end
+                end
+            end
+        end
+        log.write("SIT_World", log.INFO, "ORDER: " .. unitName .. " " .. #waypoints .. " WPs speed=" .. speed .. " roe=" .. roe .. " form=" .. formation .. " result=" .. tostring(resultStatus) .. " marker=" .. marker .. " landAvail=" .. landAvail .. " firstCall=" .. firstRaw .. " pathRaw=" .. rawCnt .. " pathPicked=" .. pickedCnt .. " err=" .. firstErr)
+        
+        -- V19.1: if on_road and we got a path back, forward it to SIT clients via UDP
+        if formation == "on_road" then
+            if resultPath and #resultPath > 5 then
+                SIT.sendUDP("R", resultPath)
+                log.write("SIT_World", log.INFO, "ORDER: " .. unitName .. " road path sent (" .. #resultPath .. " bytes)")
+            else
+                log.write("SIT_World", log.WARNING, "ORDER: " .. unitName .. " on_road but NO path returned (resultPath=" .. tostring(resultPath) .. ")")
+            end
+        end
             end -- end elseif route
             end -- end line >= 5
         end -- end for each line
@@ -2677,4 +2867,4 @@ function SIT_Callbacks.onMissionLoadEnd_legacy()
 end
 
 DCS.setUserCallbacks(SIT_Callbacks)
-log.write("SIT_World", log.INFO, "=== SIT World Hook V10 loaded (mission reset broadcast) ===")
+log.write("SIT_World", log.INFO, "=== SIT World Hook V19.1 loaded (on-road path preview + nation variants) ===")

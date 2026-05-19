@@ -2965,7 +2965,7 @@ body.combat-tablet #left-actions.left-actions-hidden,
         <input type="text" id="tgt-label-input" placeholder="Label (optionnel)" style="width:100%;padding:8px;background:#1a1a2e;color:#fff;border:1px solid #444;font-family:'Courier New';margin-bottom:8px;box-sizing:border-box;">
         <div class="modal-buttons"><button class="btn-primary" onclick="saveTGTCoord()">VALIDER</button><button class="btn-secondary" onclick="closeTGTCoordModal()">Annuler</button></div>
     </div></div>
-    <div class="modal" id="refalt-modal"><div class="modal-content"><div class="modal-title">RÉFÉRENCE ALTITUDE</div><p style="font-size:12px;color:#aaa;margin-bottom:12px;">Placer un point de référence sur la carte.<br>Les lignes de niveau seront calculées dans un rayon de 25 km (50×50 km).</p><div class="modal-buttons"><button class="btn-primary" onclick="startRefaltPlacement()">PLACER SUR CARTE</button><button class="btn-secondary" onclick="closeRefaltModal()">Plus tard</button></div></div></div>
+    <div class="modal" id="refalt-modal"><div class="modal-content"><div class="modal-title">RÉFÉRENCE ALTITUDE</div><ul style="font-size:12px;color:#bbb;margin:0 0 14px 0;padding-left:18px;line-height:1.5;"><li>Le REFALT permet d'<b style="color:#ddd;">afficher la topographie</b> d'une zone.</li><li>Il permet également de <b style="color:#ddd;">recaler convenablement les coordonnées</b> pour la zone.</li><li>Il est <b style="color:#ff6;">impératif pour un travail précis</b>. Posez-le au centre de votre zone d'opérations.</li></ul><div class="modal-buttons"><button class="btn-primary" onclick="startRefaltPlacement()">PLACER SUR CARTE</button><button class="btn-secondary" onclick="closeRefaltModal()">Plus tard</button></div></div></div>
 
     <div class="modal" id="jfo-modal"><div class="modal-content" style="min-width:280px;">
         <div class="modal-title" style="color:#f44;">APPUI FEU — JFO</div>
@@ -3999,6 +3999,10 @@ body.combat-tablet #left-actions.left-actions-hidden,
         let editingPlanName='',planEditMode=null,tempWaypoints=[],selectedWPForMove=null;
         let selectedAlly=null;
         let unitWaypoints={}; // { unitName: [{x,y},...] }
+        // V19.1: on-road path preview (polyline computed by DCS land.findPathOnRoads, decimated to ≤20 points)
+        let unitOnRoadPaths={}; // { unitName: [{x,y}, ...] in SIT coords }
+        // V19.1: off-road real-time trail — the actual path travelled by the unit since last order
+        let unitTrails={}; // { unitName: [{x,y,t}, ...] } — kept while the unit has an active waypoint
         let sharedUnitWaypoints={}; // { unitName: { author, wps:[{x,y}], timestamp } } — orders given by other clients
         let unitSettings={}; // { unitName: {speed:2, formation:'off_road', roe:'free'} }
         canvas.addEventListener('contextmenu',e=>{
@@ -6011,15 +6015,38 @@ body.combat-tablet #left-actions.left-actions-hidden,
             });
 
             // Routes assignées aux unités
+            // V19.1: when an on-road path preview is available for this unit,
+            // we draw the actual road polyline INSTEAD of the straight WP line.
+            // The off-road real-time trail is drawn separately (behind the unit) for
+            // every unit that has an active waypoint, regardless of formation.
             Object.keys(unitWaypoints).forEach(uname=>{
                 const wps=unitWaypoints[uname];if(!wps||!wps.length)return;
                 const ally=vehicleData.allies.find(a=>(a.unitName||a.name)===uname);
-                ctx.strokeStyle='#ff0';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.beginPath();
-                if(ally){const pa=worldToCanvas(ally.x,ally.y);ctx.moveTo(pa.x,pa.y);}
-                wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);if(i===0&&!ally)ctx.moveTo(pw.x,pw.y);else ctx.lineTo(pw.x,pw.y);});
-                ctx.stroke();ctx.setLineDash([]);
-                wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(pw.x,pw.y,4,0,Math.PI*2);ctx.fill();ctx.font='bold 9px Courier New';ctx.textAlign='center';ctx.fillText((i+1),pw.x,pw.y-8);});
-                ctx.textAlign='left';
+                const onRoadPath = unitOnRoadPaths[uname];
+                if(onRoadPath && onRoadPath.length >= 2){
+                    // Draw the road polyline (yellow dashed) — replaces the straight line.
+                    ctx.strokeStyle='#ff0';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.beginPath();
+                    onRoadPath.forEach((pt,i)=>{const p=worldToCanvas(pt.x,pt.y);if(i===0)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);});
+                    ctx.stroke();ctx.setLineDash([]);
+                    // WP markers at the actual destinations (not the intermediate road points)
+                    wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(pw.x,pw.y,4,0,Math.PI*2);ctx.fill();ctx.font='bold 9px Courier New';ctx.textAlign='center';ctx.fillText((i+1),pw.x,pw.y-8);});
+                    ctx.textAlign='left';
+                } else {
+                    // No road path (yet, or off-road order): straight line from unit through WPs.
+                    ctx.strokeStyle='#ff0';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.beginPath();
+                    if(ally){const pa=worldToCanvas(ally.x,ally.y);ctx.moveTo(pa.x,pa.y);}
+                    wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);if(i===0&&!ally)ctx.moveTo(pw.x,pw.y);else ctx.lineTo(pw.x,pw.y);});
+                    ctx.stroke();ctx.setLineDash([]);
+                    wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(pw.x,pw.y,4,0,Math.PI*2);ctx.fill();ctx.font='bold 9px Courier New';ctx.textAlign='center';ctx.fillText((i+1),pw.x,pw.y-8);});
+                    ctx.textAlign='left';
+                }
+                // V19.1 Option D: draw the off-road trail (real path travelled since the order) — fine grey dashed.
+                const trail = unitTrails[uname];
+                if(trail && trail.length >= 2){
+                    ctx.strokeStyle='rgba(180,180,180,0.55)';ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.beginPath();
+                    trail.forEach((pt,i)=>{const p=worldToCanvas(pt.x,pt.y);if(i===0)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);});
+                    ctx.stroke();ctx.setLineDash([]);
+                }
             });
             
             // V8: routes assignées par d'autres clients (lecture seule, étiquette d'auteur)
@@ -6030,9 +6057,15 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 if(!sw||!sw.wps||!sw.wps.length)return;
                 if(sw.author===myName&&unitWaypoints[uname])return; // own route, already drawn locally
                 const ally=vehicleData.allies.find(a=>(a.unitName||a.name)===uname);
+                const onRoadPath = unitOnRoadPaths[uname];
+                // V19.1: same logic — road polyline replaces the straight line when available
                 ctx.strokeStyle='#fa0';ctx.lineWidth=1.2;ctx.setLineDash([4,3]);ctx.beginPath();
-                if(ally){const pa=worldToCanvas(ally.x,ally.y);ctx.moveTo(pa.x,pa.y);}
-                sw.wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);if(i===0&&!ally)ctx.moveTo(pw.x,pw.y);else ctx.lineTo(pw.x,pw.y);});
+                if(onRoadPath && onRoadPath.length >= 2){
+                    onRoadPath.forEach((pt,i)=>{const p=worldToCanvas(pt.x,pt.y);if(i===0)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);});
+                }else{
+                    if(ally){const pa=worldToCanvas(ally.x,ally.y);ctx.moveTo(pa.x,pa.y);}
+                    sw.wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);if(i===0&&!ally)ctx.moveTo(pw.x,pw.y);else ctx.lineTo(pw.x,pw.y);});
+                }
                 ctx.stroke();ctx.setLineDash([]);
                 sw.wps.forEach((wp,i)=>{const pw=worldToCanvas(wp.x,wp.y);ctx.fillStyle='#fa0';ctx.beginPath();ctx.arc(pw.x,pw.y,3.5,0,Math.PI*2);ctx.fill();});
                 // Author tag at last waypoint
@@ -6041,6 +6074,13 @@ body.combat-tablet #left-actions.left-actions-hidden,
                 ctx.fillStyle='#fa0';ctx.font='9px Courier New';ctx.textAlign='center';
                 ctx.fillText('('+sw.author+')',lp.x,lp.y+15);
                 ctx.textAlign='left';
+                // Off-road trail (also shown for routes from others)
+                const trail = unitTrails[uname];
+                if(trail && trail.length >= 2){
+                    ctx.strokeStyle='rgba(180,180,180,0.55)';ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.beginPath();
+                    trail.forEach((pt,i)=>{const p=worldToCanvas(pt.x,pt.y);if(i===0)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y);});
+                    ctx.stroke();ctx.setLineDash([]);
+                }
             });
             placedObjects.forEach(o=>{const p=worldToCanvas(o.x,o.y);const isSelected=(selectedPlacedObject&&selectedPlacedObject.id===o.id);if(o.type==='WP'){ctx.fillStyle='#0f0';ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);ctx.fill();}else if(o.type==='ENI'){ctx.strokeStyle=isSelected?'#fff':'#f00';ctx.fillStyle='rgba(255,0,0,0.3)';ctx.lineWidth=isSelected?3:2;ctx.beginPath();ctx.moveTo(p.x,p.y-10);ctx.lineTo(p.x+8,p.y);ctx.lineTo(p.x,p.y+10);ctx.lineTo(p.x-8,p.y);ctx.closePath();ctx.fill();ctx.stroke();}else if(o.type==='AMI'){ctx.strokeStyle=isSelected?'#fff':'#3b82f6';ctx.fillStyle='rgba(59,130,246,0.3)';ctx.lineWidth=isSelected?3:2;ctx.strokeRect(p.x-8,p.y-8,16,16);ctx.fillRect(p.x-8,p.y-8,16,16);}ctx.fillStyle='#fff';ctx.font='9px Courier New';ctx.textAlign='center';ctx.fillText(o.label.substring(0,3),p.x,p.y+18);
                 // Afficher coordonnées si sélectionné
@@ -8710,6 +8750,46 @@ body.combat-tablet #left-actions.left-actions-hidden,
         // ---- REFALT (lignes de niveau) ----
         function openRefaltModal(){document.getElementById('refalt-modal').classList.add('visible');}
         function closeRefaltModal(){document.getElementById('refalt-modal').classList.remove('visible');}
+        // V19.1: blink the REF button red while no REFALT has been placed yet.
+        // We don't rely on a CSS class — there are 11+ other CSS rules targeting
+        // .ref that always win source-order against any animation we'd declare.
+        // Instead we flip inline styles with !important every ~500ms; inline
+        // styles with !important beat every CSS rule, period.
+        window._refaltBlinkState = {tick: 0, phase: 0, lastApplied: ''};
+        const REFALT_BLINK_OFF = ''; // empty cssText → restore default styles
+        const REFALT_BLINK_A = 'color:#ff6464 !important; background:linear-gradient(180deg,#3a1818,#1a0a0a) !important; border-color:rgba(239,85,79,.85) !important; box-shadow:inset 0 0 10px rgba(239,85,79,0.45),0 0 14px rgba(239,85,79,0.55) !important; text-shadow:0 0 6px rgba(255,80,80,.8) !important;';
+        const REFALT_BLINK_B = 'color:#ffd0d0 !important; background:linear-gradient(180deg,#6a2424,#341010) !important; border-color:rgba(255,140,140,1) !important; box-shadow:inset 0 0 16px rgba(255,90,90,0.75),0 0 26px rgba(255,90,90,1) !important; text-shadow:0 0 12px rgba(255,140,140,1) !important;';
+        function _refreshRefaltMissingState(){
+            try {
+                const st = window._refaltBlinkState;
+                st.tick++;
+                const btn = document.getElementById('hwbtn-refalt');
+                if(!btn) {
+                    btn && (btn.title = 'no btn');
+                    return;
+                }
+                let missing = true;
+                try { missing = (typeof refaltCenter === 'undefined' || refaltCenter === null); } catch(e) { missing = true; }
+                // Visible debug in tooltip — hover the REF button to see this.
+                btn.title = 'Référence altitude (tick=' + st.tick + ' missing=' + missing + ' phase=' + st.phase + ')';
+                if(missing){
+                    st.phase = 1 - st.phase;
+                    const css = st.phase ? REFALT_BLINK_A : REFALT_BLINK_B;
+                    btn.style.cssText = css;
+                    st.lastApplied = css;
+                } else {
+                    if(st.lastApplied){
+                        btn.style.cssText = '';
+                        st.lastApplied = '';
+                        st.phase = 0;
+                    }
+                }
+            } catch(e) {
+                const btn = document.getElementById('hwbtn-refalt');
+                if(btn) btn.title = 'ERR ' + e.message;
+            }
+        }
+        setInterval(_refreshRefaltMissingState, 500);
         function toggleContours(){
             refaltShowContours=!refaltShowContours;
             const btn=document.getElementById('btn-contours');
@@ -10211,6 +10291,27 @@ body.combat-tablet #left-actions.left-actions-hidden,
                         if(!lastData)lastData={};
                         lastData.enemies=enemies;
                     }
+                    // V19.1: extend the off-road trail for every unit that has an active waypoint.
+                    // Cheap O(allies) loop; only adds a point when the unit has moved ≥30m since
+                    // its last recorded trail point, and caps the trail length at 80 points.
+                    try {
+                        const TRAIL_MIN_DIST = 30; // meters
+                        const TRAIL_MAX_PTS  = 80;
+                        const nowTs = Date.now();
+                        vehicleData.allies.forEach(a => {
+                            const uname = a.unitName || a.name;
+                            if(!uname) return;
+                            // Only trail units that have an active order (local or shared)
+                            if(!unitWaypoints[uname] && !sharedUnitWaypoints[uname]) return;
+                            if(!unitTrails[uname]) unitTrails[uname] = [];
+                            const tr = unitTrails[uname];
+                            const last = tr.length > 0 ? tr[tr.length - 1] : null;
+                            if(!last || Math.hypot(a.x - last.x, a.y - last.y) >= TRAIL_MIN_DIST){
+                                tr.push({x: a.x, y: a.y, t: nowTs});
+                                if(tr.length > TRAIL_MAX_PTS) tr.shift();
+                            }
+                        });
+                    } catch(e) {}
                 }
                 
                 // Dessins partagés
@@ -10349,6 +10450,8 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     if(typeof multiSharedPlans!=='undefined')multiSharedPlans={};
                     if(typeof sharedUnitWaypoints!=='undefined')sharedUnitWaypoints={};
                     if(typeof unitWaypoints!=='undefined')unitWaypoints={};
+                    if(typeof unitOnRoadPaths!=='undefined')unitOnRoadPaths={};
+                    if(typeof unitTrails!=='undefined')unitTrails={};
                     if(typeof sharedJFOStrikes!=='undefined')sharedJFOStrikes=[];
                     if(typeof placedJFOStrikes!=='undefined')placedJFOStrikes=[];
                     // V12: trace, ghosts, pings
@@ -10443,6 +10546,9 @@ body.combat-tablet #left-actions.left-actions-hidden,
                     if(refLat===null)return; // can't convert lat/lon → SIT yet
                     if(msg.order==='stop'||!Array.isArray(msg.waypoints)||msg.waypoints.length===0){
                         delete sharedUnitWaypoints[msg.unitName];
+                        // V19.1: also clear any cached on-road preview / off-road trail for this unit
+                        delete unitOnRoadPaths[msg.unitName];
+                        delete unitTrails[msg.unitName];
                     }else{
                         const wpsLocal=msg.waypoints.map(w=>{
                             if(typeof w.lat==='number'&&typeof w.lon==='number'){
@@ -10451,11 +10557,29 @@ body.combat-tablet #left-actions.left-actions-hidden,
                             return {x:w.x||0,y:w.y||0};
                         });
                         sharedUnitWaypoints[msg.unitName]={author:msg.author||'?',wps:wpsLocal,timestamp:msg.timestamp||Date.now()};
+                        // V19.1: a new order resets the trail (so we trace the new run only)
+                        unitTrails[msg.unitName] = [];
+                        // unitOnRoadPaths only changes when the hook sends an R packet;
+                        // clearing here forces the SIT to fall back to the straight line
+                        // until the path preview arrives (typically <1s later).
+                        delete unitOnRoadPaths[msg.unitName];
                     }
                     // If author is myself, also keep local unitWaypoints in sync (local view priority)
                     if(msg.author===myName){
                         if(msg.order==='stop'){delete unitWaypoints[msg.unitName];}
                     }
+                }
+                
+                // V19.1: on-road path preview from the hook (computed via land.findPathOnRoads)
+                if(msg.type==='unitPathPreview'){
+                    if(!msg.unitName || refLat===null)return;
+                    if(!Array.isArray(msg.pts) || msg.pts.length<2){
+                        delete unitOnRoadPaths[msg.unitName];
+                        return;
+                    }
+                    // Convert [[lat,lon], ...] → [{x,y}, ...] in SIT coords
+                    const pts = msg.pts.map(p => latLonToSIT(p[0], p[1]));
+                    unitOnRoadPaths[msg.unitName] = pts;
                 }
                 
                 // Phase 2 : données DCS (ammo/life) relayées par le serveur

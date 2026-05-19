@@ -1,6 +1,6 @@
 {
   "name": "mcl-sit",
-  "version": "19.0.0",
+  "version": "19.1.0",
   "description": "MCL-SIT — Système d'Information Tactique pour DCS World",
   "main": "src/main/main.js",
   "author": "131st-Dimitriov",
